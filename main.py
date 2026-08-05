@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – Dirty Crypto OTC Bot (final clean version)"""
+"""Vold Market Bot"""
 
 import asyncio
 import logging
