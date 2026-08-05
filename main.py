@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – v2.1 (English only, immediate referral notifications)"""
+"""Vold Market Bot – English only, referral tracking, no auto-commission."""
 
 import asyncio
 import logging
@@ -72,11 +72,11 @@ T = {
     "vouches": "✅ Vouches",
     "referral_info": (
         "👥 *Referral Program*\n\n"
-        "Invite your friends and earn *30%* of every deposit they make.\n\n"
+        "Invite your friends! You'll be notified when someone joins through your link.\n\n"
         "Your referral link:\n"
         "`https://t.me/{}?start=ref{}`\n\n"
-        "Your current earnings: *${:.2f}*\n\n"
-        "Share the link. When someone starts the bot through it and makes a purchase, you'll receive your commission automatically."
+        "People you referred: *{}*\n\n"
+        "Share the link. When someone starts the bot through it, you'll receive a notification automatically."
     ),
     "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $50",
     "invalid_amount": "❌ Invalid amount. Enter a number >= 50.",
@@ -116,18 +116,8 @@ T = {
         "Receives: {:.6f} {} (dirty)\n"
         "Receive address: `{}`"
     ),
-    "admin_notify_ref": (
-        "🤑 *New payment notification!*\n"
-        "User: @{}\n"
-        "Referred by: @{}\n"
-        "Amount: ${:.2f} / {:.6f} {}\n"
-        "Receives: {:.6f} {} (dirty)\n"
-        "Receive address: `{}`"
-    ),
-    "referrer_notify": (
-        "💰 Your referral @{} just made a purchase of *${:.2f}*!\n"
-        "You earned a commission of *${:.2f}*."
-    ),
+    "referrer_join_notify": "🎉 Someone just joined using your referral link!",
+    "referral_join_info": "You were invited by a friend. You'll be added to their referral list.",
     "support_text": "For any questions, contact {}",
     "tos_text": """📝 *Terms Of Services*
 1. Transaction: All trades are final. Prices are indicative and may change.
@@ -162,13 +152,12 @@ A: Once sent, it's out of our control. Use a new non‑KYC wallet.
 
 Q: How to clean?
 A: Guide provided with purchase.""",
-    "lang_changed": "✅ Language set to English.",
     "flash_sale_message": "🔥 Flash Sales: Bonus +$100 for 1h! 🔥",
     "stats_text": (
         "📊 *Bot Statistics*\n"
         "Total users: {}\n"
         "Referral participants: {}\n"
-        "Total referral commissions: ${:.2f}"
+        "Total referral links used: {}"
     ),
     "rates_updated": "✅ Multiplier tiers updated.",
     "rates_reset": "✅ Multiplier tiers reset to default.",
@@ -179,8 +168,9 @@ A: Guide provided with purchase.""",
 all_users: Set[int] = set()
 pending_checks: Dict[int, asyncio.Task] = {}
 
-referral_tree: Dict[int, int] = {}
-referral_balance: Dict[int, float] = {}
+# Parrainage simple : suivi et comptage
+referral_tree: Dict[int, int] = {}      # user_id -> referrer_id
+referral_count: Dict[int, int] = {}     # referrer_id -> number of direct referrals
 
 # ==================== HELPERS ====================
 def t(key: str, *args) -> str:
@@ -217,6 +207,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     all_users.add(user_id)
 
+    # Gestion du parrainage à l'arrivée
     if update.message and update.message.text:
         args = update.message.text.split()
         if len(args) > 1 and args[1].startswith("ref"):
@@ -226,7 +217,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 referrer_id = None
             if referrer_id and referrer_id != user_id and referrer_id in all_users:
                 referral_tree[user_id] = referrer_id
-                await update.message.reply_text("You were invited by a friend. You both will benefit from the referral program!")
+                referral_count[referrer_id] = referral_count.get(referrer_id, 0) + 1
+                # Notifier le parrain
+                try:
+                    await context.bot.send_message(referrer_id, T["referrer_join_notify"])
+                except:
+                    pass
+                await update.message.reply_text(T["referral_join_info"])
 
     await update.message.reply_text(T["start"], reply_markup=main_menu(), parse_mode=ParseMode.MARKDOWN)
 
@@ -249,8 +246,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif data == "support":
         await query.edit_message_text(t("support_text", SUPPORT_USERNAME), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]))
     elif data == "referral":
-        earnings = referral_balance.get(user_id, 0.0)
-        text = t("referral_info", BOT_USERNAME, user_id, earnings)
+        count = referral_count.get(user_id, 0)
+        text = t("referral_info", BOT_USERNAME, user_id, count)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "back":
         await cmd_start(update, context)
@@ -370,40 +367,13 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     dirty_amount = context.user_data["dirty_amount"]
     receive_address = context.user_data["receive_address"]
 
-    # ---- Traitement immédiat du parrainage ----
-    referrer_id = referral_tree.get(user_id)
-    if referrer_id:
-        commission = pay_amount * 0.30
-        referral_balance[referrer_id] = referral_balance.get(referrer_id, 0.0) + commission
-        # Notifier le parrain
-        referrer_name = (await context.bot.get_chat(referrer_id)).username or referrer_id
-        buyer_name = query.from_user.username or user_id
-        try:
-            await context.bot.send_message(
-                referrer_id,
-                t("referrer_notify", buyer_name, pay_amount, commission),
-                parse_mode=ParseMode.MARKDOWN,
-            )
-        except:
-            pass
-        # Message admin avec info parrainage
-        admin_text = t("admin_notify_ref",
-                       buyer_name,
-                       referrer_name,
-                       pay_amount, expected, pay_coin,
-                       dirty_amount, receive_coin,
-                       receive_address)
-    else:
-        admin_text = t("admin_notify",
-                       query.from_user.username or user_id,
-                       pay_amount, expected, pay_coin,
-                       dirty_amount, receive_coin,
-                       receive_address)
-
+    # Notification admin – sans mention de parrainage automatique
+    admin_text = t("admin_notify",
+                   query.from_user.username or user_id,
+                   pay_amount, expected, pay_coin,
+                   dirty_amount, receive_coin,
+                   receive_address)
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
-
-    # Marque le parrainage comme traité pour éviter une double commission
-    context.user_data["referral_processed"] = True
 
     paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
     if paid:
@@ -417,13 +387,13 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await query.edit_message_text(T["no_payment"], reply_markup=keyboard)
         task = asyncio.create_task(recheck_payment_after_delay(
             context.bot, user_id, query.message.chat_id, query.message.message_id,
-            pay_coin, expected, context.user_data.copy(),
+            pay_coin, expected,
         ))
         pending_checks[user_id] = task
         return PAYMENT
 
 async def recheck_payment_after_delay(bot, user_id, chat_id, message_id,
-                                      pay_coin, expected, user_data):
+                                      pay_coin, expected):
     try:
         await asyncio.sleep(60)
         paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
@@ -462,9 +432,9 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
     total_refs = len(referral_tree)
-    total_comm = sum(referral_balance.values())
+    total_links = sum(referral_count.values())
     await update.message.reply_text(
-        t("stats_text", len(all_users), total_refs, total_comm),
+        t("stats_text", len(all_users), total_refs, total_links),
         parse_mode=ParseMode.MARKDOWN,
     )
 
