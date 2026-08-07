@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – English only, persistent data, interactive admin panel."""
+"""Vold Market Bot – English only, persistent data, interactive admin panel, manual stock control."""
 
 import asyncio
 import json
@@ -38,7 +38,6 @@ CRYPTO_ADDRESSES = {
     "XMR": "48hjiNMpfpQ8BfLe1Hy6P7MxZM4WXvXLggAdc3Er4Pzs6W5dDYStBzzKB9VWcBCNZHDuoexKTT9HJYoCR1GZX6Qs4M7a3YW",
 }
 
-# Persistent data file
 DATA_FILE = "vold_data.json"
 
 # ==================== PERSISTENCE ====================
@@ -50,8 +49,9 @@ def load_data():
         referral_tree_dict = {int(k): int(v) for k, v in data.get("ref_tree", {}).items()}
         referral_count_dict = {int(k): v for k, v in data.get("ref_count", {}).items()}
         tiers = data.get("multipliers", None)
-        return all_users_set, referral_tree_dict, referral_count_dict, tiers
-    return set(), {}, {}, None
+        saved_stock = data.get("stock", {"ETH": 87471.0, "BTC": 51785.0})
+        return all_users_set, referral_tree_dict, referral_count_dict, tiers, saved_stock
+    return set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0}
 
 def save_data():
     data = {
@@ -59,12 +59,12 @@ def save_data():
         "ref_tree": {str(k): v for k, v in referral_tree.items()},
         "ref_count": {str(k): v for k, v in referral_count.items()},
         "multipliers": list(MULTIPLIER_TIERS),
+        "stock": STOCK,
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-# Load initial data
-all_users, referral_tree, referral_count, saved_tiers = load_data()
+all_users, referral_tree, referral_count, saved_tiers, saved_stock = load_data()
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
 else:
@@ -75,6 +75,8 @@ else:
         (1000, float("inf"), 4.0),
     ]
 
+STOCK = saved_stock
+
 PRICE = {
     "BTC": 64180.26,
     "ETH": 1872.69,
@@ -84,9 +86,8 @@ PRICE = {
     "USDT_TRC20": 1.0,
     "XMR": 360.70,
 }
-STOCK = {"ETH": 87471.0, "BTC": 51785.0}
 
-# ==================== TRANSLATIONS (English only) ====================
+# ==================== TRANSLATIONS ====================
 T = {
     "start": (
         "🤖 *Vold Market Bot*\n"
@@ -104,7 +105,7 @@ T = {
     "vouches": "✅ Vouches",
     "referral_info": (
         "👥 *Referral Program*\n\n"
-        "Invite your friends! You will earn 30% of your referral's spending and you'll be notified when someone joins through your link.\n\n"
+        "Invite your friends! You'll be notified when someone joins through your link.\n\n"
         "Your referral link:\n"
         "`https://t.me/{}?start=ref{}`\n\n"
         "People you referred: *{}*\n\n"
@@ -209,8 +210,13 @@ A: Guide provided with purchase.""",
         "/admin – Open interactive admin panel\n"
         "/stats – Show bot statistics\n"
         "/dmall [message] – Send a broadcast message to all users (optional custom message)\n"
-        "/help – Show this help\n"
+        "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
+        "/setstock <ETH|BTC> <value> – Manually set the available stock for a coin\n"
+        "/help – Show this help"
     ),
+    "stock_updated": "✅ Stock for {} set to ${:,.2f}",
+    "stock_usage": "Usage: /setstock <ETH|BTC> <value>",
+    "stock_invalid_coin": "❌ Unknown coin. Use ETH or BTC.",
 }
 
 # ==================== HELPERS ====================
@@ -238,7 +244,7 @@ def main_menu() -> InlineKeyboardMarkup:
 def admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 View Rates", callback_data="admin_view_rates")],
-        [InlineKeyboardButton("➕ Add Tier", callback_data="admin_add_tier")],
+        [InlineKeyboardButton("➕ Add Tier (use /setrates)", callback_data="admin_add_tier")],
         [InlineKeyboardButton("❌ Delete Last Tier", callback_data="admin_del_tier")],
         [InlineKeyboardButton("🔄 Reset Default", callback_data="admin_reset_rates")],
         [InlineKeyboardButton("📢 DMALL", callback_data="admin_dmall")],
@@ -246,7 +252,6 @@ def admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔙 Close Panel", callback_data="admin_close")],
     ])
 
-# Save data after changes
 def save_and_log():
     save_data()
     logging.info("Data saved.")
@@ -256,6 +261,7 @@ async def stock_updater():
     while True:
         STOCK["ETH"] = round(random.uniform(80_000, 90_000), 2)
         STOCK["BTC"] = round(random.uniform(50_000, 60_000), 2)
+        save_and_log()
         logging.info(f"Stocks updated: ETH={STOCK['ETH']}, BTC={STOCK['BTC']}")
         await asyncio.sleep(30 * 60)
 
@@ -283,7 +289,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     pass
                 await update.message.reply_text(T["referral_join_info"])
 
-    # If called from callback, edit the message; else send new
     if update.callback_query:
         query = update.callback_query
         await query.answer()
@@ -314,7 +319,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         text = t("referral_info", BOT_USERNAME, user_id, count)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "back":
-        await cmd_start(update, context)  # go to main menu
+        await cmd_start(update, context)
 
 # ==================== BUY CONVERSATION ====================
 AMOUNT, COIN_RECEIVE, ADDRESS_RECEIVE, PAYMENT_METHOD, PAYMENT = range(5)
@@ -525,7 +530,6 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]]))
     elif data == "admin_add_tier":
-        # Guide the admin to use /setrates command for now (or implement inline state)
         await query.edit_message_text("Use /setrates <low> <high> <mult> to add or update a tier.",
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
     elif data == "admin_del_tier":
@@ -619,6 +623,25 @@ async def cmd_setrates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     save_and_log()
     await update.message.reply_text(T["rates_updated"])
 
+async def cmd_setstock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args or len(context.args) != 2:
+        await update.message.reply_text(T["stock_usage"])
+        return
+    coin = context.args[0].upper()
+    try:
+        value = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text(T["stock_usage"])
+        return
+    if coin not in STOCK:
+        await update.message.reply_text(T["stock_invalid_coin"])
+        return
+    STOCK[coin] = value
+    save_and_log()
+    await update.message.reply_text(t("stock_updated", coin, value))
+
 # ==================== MAIN ====================
 async def on_startup(app: Application):
     asyncio.create_task(stock_updater())
@@ -628,7 +651,6 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     app = Application.builder().token(BOT_TOKEN).post_init(on_startup).build()
 
-    # Conversation handler for buying
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(buy_start, pattern="^buy$")],
         states={
@@ -645,19 +667,16 @@ def main() -> None:
     )
     app.add_handler(conv_handler)
 
-    # Menu and back (standalone)
     app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(referral|rates|faq|tos|support|back)$"))
-
-    # Admin panel callbacks
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
 
-    # Commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("dmall", cmd_dmall))
     app.add_handler(CommandHandler("setrates", cmd_setrates))
+    app.add_handler(CommandHandler("setstock", cmd_setstock))
 
     print("Bot running...")
     app.run_polling()
