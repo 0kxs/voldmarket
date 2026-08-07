@@ -105,7 +105,7 @@ T = {
     "vouches": "✅ Vouches",
     "referral_info": (
         "👥 *Referral Program*\n\n"
-        "Invite your friends! You will receive 30% of your referrals spending on the bot and you'll notified when someone joins through your link.\n\n"
+        "Invite your friends! You will receive 30% of your referrals spending on the bot and you'll be notified when someone joins through your link.\n\n"
         "Your referral link:\n"
         "`https://t.me/{}?start=ref{}`\n\n"
         "People you referred: *{}*\n\n"
@@ -262,8 +262,8 @@ def save_and_log():
 # ==================== STOCK UPDATER ====================
 async def stock_updater():
     while True:
-        STOCK["ETH"] = round(random.uniform(80_000, 90_000), 2)
-        STOCK["BTC"] = round(random.uniform(50_000, 60_000), 2)
+        for coin in ("ETH", "BTC"):
+            STOCK[coin] = round(max(0.0, STOCK[coin] + random.uniform(-3000, 3000)), 2)
         save_and_log()
         logging.info(f"Stocks updated: ETH={STOCK['ETH']}, BTC={STOCK['BTC']}")
         await asyncio.sleep(30 * 60)
