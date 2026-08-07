@@ -111,8 +111,8 @@ T = {
         "People you referred: *{}*\n\n"
         "Share the link. When someone starts the bot through it, you'll receive a notification automatically."
     ),
-    "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $40",
-    "invalid_amount": "❌ Invalid amount. Enter a number >= 40.",
+    "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $50",
+    "invalid_amount": "❌ Invalid amount. Enter a number >= 50.",
     "stock_error": "❌ Sorry, we don't have enough stock for that amount. Available stock: *${:,.0f}* in {} .",
     "choose_receive_coin": "Which coin do you want to **receive** (dirty)?",
     "receive_estimate": (
@@ -138,7 +138,7 @@ T = {
         "❌ No payment detected yet.\n"
         "New check in 60 seconds. You can cancel the transaction below."
     ),
-    "payment_found": (
+    "payment_found_contact": (
         "❌ Payment not detected!\n"
         "Please contact {} to finalize your dirty coins delivery."
     ),
@@ -174,7 +174,7 @@ Q: How do I buy?
 A: Use the bot or message @reuvensh. You'll get a deposit address.
 
 Q: Minimum?
-A: $40 equivalent. No maximum.
+A: $50 equivalent. No maximum.
 
 Q: Why don't you clean the coins yourselves?
 A: Cleaning large amounts takes time and spreads risk. We sell at a discount and let buyers handle cleaning. It's faster for us and still a good deal.
@@ -334,7 +334,7 @@ async def amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     text = update.message.text.strip()
     try:
         amount = float(text)
-        if amount < 40:
+        if amount < 50:
             raise ValueError
     except ValueError:
         await update.message.reply_text(T["invalid_amount"])
@@ -436,6 +436,7 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     dirty_amount = context.user_data["dirty_amount"]
     receive_address = context.user_data["receive_address"]
 
+    # Envoi notification admin
     referrer_id = referral_tree.get(user_id)
     if referrer_id:
         try:
@@ -457,22 +458,29 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                        receive_address)
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
 
-    paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
-    if paid:
-        await query.edit_message_text(t("payment_found", SUPPORT_USERNAME))
-        await cmd_start(update, context)
-        return ConversationHandler.END
-    else:
-        if user_id in pending_checks:
-            pending_checks[user_id].cancel()
+    # Mise à jour du message utilisateur avec gestion d'erreur
+    try:
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
         await query.edit_message_text(T["no_payment"], reply_markup=keyboard)
-        task = asyncio.create_task(recheck_payment_after_delay(
-            context.bot, user_id, query.message.chat_id, query.message.message_id,
-            pay_coin, expected,
-        ))
-        pending_checks[user_id] = task
-        return PAYMENT
+    except Exception as e:
+        logging.error(f"Failed to edit message after payment check: {e}")
+        # Envoyer un nouveau message pour éviter le blocage
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=T["no_payment"],
+            reply_markup=keyboard,
+        )
+
+    # Planifier une revérification après 60 secondes
+    if user_id in pending_checks:
+        pending_checks[user_id].cancel()
+    task = asyncio.create_task(recheck_payment_after_delay(
+        context.bot, user_id, query.message.chat_id, query.message.message_id,
+        pay_coin, expected,
+    ))
+    pending_checks[user_id] = task
+    return PAYMENT
 
 async def recheck_payment_after_delay(bot, user_id, chat_id, message_id,
                                       pay_coin, expected):
@@ -481,16 +489,18 @@ async def recheck_payment_after_delay(bot, user_id, chat_id, message_id,
         paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
         if paid:
             await bot.edit_message_text(
-                t("payment_found", SUPPORT_USERNAME),
+                t("payment_found_contact", SUPPORT_USERNAME),
                 chat_id=chat_id, message_id=message_id,
             )
         else:
             await bot.edit_message_text(
-                t("payment_found", SUPPORT_USERNAME),
+                t("payment_found_contact", SUPPORT_USERNAME),
                 chat_id=chat_id, message_id=message_id,
             )
     except asyncio.CancelledError:
         pass
+    except Exception as e:
+        logging.error(f"Error during recheck: {e}")
     finally:
         if user_id in pending_checks:
             del pending_checks[user_id]
@@ -507,6 +517,7 @@ async def cancel_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def verify_payment(crypto: str, address: str, expected: float) -> bool:
+    # Simulation : paiement jamais détecté
     return False
 
 # ==================== ADMIN PANEL ====================
