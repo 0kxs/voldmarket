@@ -105,7 +105,7 @@ T = {
     "vouches": "✅ Vouches",
     "referral_info": (
         "👥 *Referral Program*\n\n"
-        "Invite your friends! You'll be notified when someone joins through your link.\n\n"
+        "Invite your friends! You will receive 30% of your referrals spending on the bot and you'll notified when someone joins through your link.\n\n"
         "Your referral link:\n"
         "`https://t.me/{}?start=ref{}`\n\n"
         "People you referred: *{}*\n\n"
