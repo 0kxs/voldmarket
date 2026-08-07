@@ -219,6 +219,9 @@ A: Guide provided with purchase.""",
     "stock_invalid_coin": "❌ Unknown coin. Use ETH or BTC.",
 }
 
+# ==================== GLOBALS ====================
+pending_checks: Dict[int, asyncio.Task] = {}
+
 # ==================== HELPERS ====================
 def t(key: str, *args) -> str:
     return T[key].format(*args)
@@ -436,7 +439,7 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     dirty_amount = context.user_data["dirty_amount"]
     receive_address = context.user_data["receive_address"]
 
-    # Envoi notification admin
+    # Notification admin
     referrer_id = referral_tree.get(user_id)
     if referrer_id:
         try:
@@ -464,13 +467,16 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await query.edit_message_text(T["no_payment"], reply_markup=keyboard)
     except Exception as e:
         logging.error(f"Failed to edit message after payment check: {e}")
-        # Envoyer un nouveau message pour éviter le blocage
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=T["no_payment"],
-            reply_markup=keyboard,
-        )
+        try:
+            # Envoyer un nouveau message avec le bouton Cancel
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=T["no_payment"],
+                reply_markup=keyboard,
+            )
+        except Exception as e2:
+            logging.error(f"Could not send new payment message: {e2}")
 
     # Planifier une revérification après 60 secondes
     if user_id in pending_checks:
@@ -510,27 +516,25 @@ async def cancel_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     user_id = query.from_user.id
 
-    # Annuler les tâches de revérification en cours
+    # Annuler d'éventuelles revérifications
     if user_id in pending_checks:
         pending_checks[user_id].cancel()
         del pending_checks[user_id]
 
-    # Supprimer le message contenant le bouton Cancel (ou l'ignorer)
+    # Essayer d'éditer le message pour afficher "Purchase cancelled."
     try:
-        await query.delete_message()
+        await query.edit_message_text("Purchase cancelled.")
     except Exception:
-        pass  # message déjà supprimé ou inaccessible
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text="Purchase cancelled."
+        )
 
-    # Envoyer un nouveau message de confirmation et le menu principal
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="Purchase cancelled."
-    )
+    # Ramener l'utilisateur au menu principal
     await cmd_start(update, context)
     return ConversationHandler.END
 
 async def verify_payment(crypto: str, address: str, expected: float) -> bool:
-    # Simulation : paiement jamais détecté
     return False
 
 # ==================== ADMIN PANEL ====================
