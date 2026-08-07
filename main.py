@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – English only, referral tracking, no auto-commission."""
+"""Vold Market Bot – English only, referral tracking, admin help."""
 
 import asyncio
 import logging
@@ -116,6 +116,14 @@ T = {
         "Receives: {:.6f} {} (dirty)\n"
         "Receive address: `{}`"
     ),
+    "admin_notify_ref": (
+        "🤑 *New payment notification!*\n"
+        "User: @{}\n"
+        "Referred by: @{}\n"
+        "Amount: ${:.2f} / {:.6f} {}\n"
+        "Receives: {:.6f} {} (dirty)\n"
+        "Receive address: `{}`"
+    ),
     "referrer_join_notify": "🎉 Someone just joined using your referral link!",
     "referral_join_info": "You were invited by a friend. You'll be added to their referral list.",
     "support_text": "For any questions, contact {}",
@@ -162,13 +170,19 @@ A: Guide provided with purchase.""",
     "rates_updated": "✅ Multiplier tiers updated.",
     "rates_reset": "✅ Multiplier tiers reset to default.",
     "invalid_tier": "❌ Invalid tier format. Use: /setrates <low> <high> <mult>",
+    "help_text": (
+        "🛠️ *Admin Commands*\n\n"
+        "/stats – Show bot statistics\n"
+        "/dmall [message] – Send a broadcast message to all users (optional custom message)\n"
+        "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
+        "/resetrates – Reset multiplier tiers to default\n"
+    ),
 }
 
 # ==================== GLOBALS ====================
 all_users: Set[int] = set()
 pending_checks: Dict[int, asyncio.Task] = {}
 
-# Parrainage simple : suivi et comptage
 referral_tree: Dict[int, int] = {}      # user_id -> referrer_id
 referral_count: Dict[int, int] = {}     # referrer_id -> number of direct referrals
 
@@ -207,7 +221,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     all_users.add(user_id)
 
-    # Gestion du parrainage à l'arrivée
     if update.message and update.message.text:
         args = update.message.text.split()
         if len(args) > 1 and args[1].startswith("ref"):
@@ -218,7 +231,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if referrer_id and referrer_id != user_id and referrer_id in all_users:
                 referral_tree[user_id] = referrer_id
                 referral_count[referrer_id] = referral_count.get(referrer_id, 0) + 1
-                # Notifier le parrain
                 try:
                     await context.bot.send_message(referrer_id, T["referrer_join_notify"])
                 except:
@@ -367,12 +379,27 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     dirty_amount = context.user_data["dirty_amount"]
     receive_address = context.user_data["receive_address"]
 
-    # Notification admin – sans mention de parrainage automatique
-    admin_text = t("admin_notify",
-                   query.from_user.username or user_id,
-                   pay_amount, expected, pay_coin,
-                   dirty_amount, receive_coin,
-                   receive_address)
+    # Détection du parrain pour information admin seulement
+    referrer_id = referral_tree.get(user_id)
+    if referrer_id:
+        try:
+            referrer_chat = await context.bot.get_chat(referrer_id)
+            referrer_name = referrer_chat.username or str(referrer_id)
+        except:
+            referrer_name = str(referrer_id)
+        admin_text = t("admin_notify_ref",
+                       query.from_user.username or user_id,
+                       referrer_name,
+                       pay_amount, expected, pay_coin,
+                       dirty_amount, receive_coin,
+                       receive_address)
+    else:
+        admin_text = t("admin_notify",
+                       query.from_user.username or user_id,
+                       pay_amount, expected, pay_coin,
+                       dirty_amount, receive_coin,
+                       receive_address)
+
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
 
     paid = await verify_payment(pay_coin, CRYPTO_ADDRESSES[pay_coin], expected)
@@ -428,6 +455,11 @@ async def verify_payment(crypto: str, address: str, expected: float) -> bool:
     return False
 
 # ==================== ADMIN COMMANDS ====================
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await update.message.reply_text(T["help_text"], parse_mode=ParseMode.MARKDOWN)
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
@@ -517,6 +549,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(referral|rates|faq|tos|support|back)$"))
     app.add_handler(CommandHandler("start", cmd_start))
 
+    # Admin commands
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("dmall", cmd_dmall))
     app.add_handler(CommandHandler("setrates", cmd_setrates))
