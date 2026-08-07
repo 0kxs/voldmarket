@@ -509,10 +509,23 @@ async def cancel_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
+
+    # Annuler les tâches de revérification en cours
     if user_id in pending_checks:
         pending_checks[user_id].cancel()
         del pending_checks[user_id]
-    await query.edit_message_text("Purchase cancelled.")
+
+    # Supprimer le message contenant le bouton Cancel (ou l'ignorer)
+    try:
+        await query.delete_message()
+    except Exception:
+        pass  # message déjà supprimé ou inaccessible
+
+    # Envoyer un nouveau message de confirmation et le menu principal
+    await context.bot.send_message(
+        chat_id=query.message.chat_id,
+        text="Purchase cancelled."
+    )
     await cmd_start(update, context)
     return ConversationHandler.END
 
