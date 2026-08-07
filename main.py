@@ -334,7 +334,7 @@ async def amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     text = update.message.text.strip()
     try:
         amount = float(text)
-        if amount < 50:
+        if amount < 40:
             raise ValueError
     except ValueError:
         await update.message.reply_text(T["invalid_amount"])
