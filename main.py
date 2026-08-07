@@ -111,8 +111,8 @@ T = {
         "People you referred: *{}*\n\n"
         "Share the link. When someone starts the bot through it, you'll receive a notification automatically."
     ),
-    "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $50",
-    "invalid_amount": "❌ Invalid amount. Enter a number >= 50.",
+    "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $40",
+    "invalid_amount": "❌ Invalid amount. Enter a number >= 40.",
     "stock_error": "❌ Sorry, we don't have enough stock for that amount. Available stock: *${:,.0f}* in {} .",
     "choose_receive_coin": "Which coin do you want to **receive** (dirty)?",
     "receive_estimate": (
@@ -174,7 +174,7 @@ Q: How do I buy?
 A: Use the bot or message @reuvensh. You'll get a deposit address.
 
 Q: Minimum?
-A: $50 equivalent. No maximum.
+A: $40 equivalent. No maximum.
 
 Q: Why don't you clean the coins yourselves?
 A: Cleaning large amounts takes time and spreads risk. We sell at a discount and let buyers handle cleaning. It's faster for us and still a good deal.
@@ -334,7 +334,7 @@ async def amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     text = update.message.text.strip()
     try:
         amount = float(text)
-        if amount < 50:
+        if amount < 40:
             raise ValueError
     except ValueError:
         await update.message.reply_text(T["invalid_amount"])
