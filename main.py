@@ -563,30 +563,38 @@ async def verify_payment(crypto: str, address: str, expected: float) -> bool:
 # ==================== GIVEAWAY COMMAND ====================
 async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    # Vérifier l'appartenance au canal
     try:
         chat_member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        if chat_member.status not in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR):
+        if chat_member.status not in (
+            ChatMemberStatus.MEMBER,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.CREATOR,
+            ChatMemberStatus.RESTRICTED,
+        ):
             await update.message.reply_text(T["giveaway_join_channel"])
             return
-    except Exception:
-        await update.message.reply_text("⚠️ Unable to verify channel membership. Please try again.")
+    except Exception as e:
+        logging.error(f"Giveaway membership check error: {e}")
+        await update.message.reply_text(
+            "⚠️ An error occurred while verifying channel membership. Please try again later."
+        )
         return
 
-    # L'utilisateur est membre du canal
-    if user_id in giveaway_participants:
-        entries = compute_entries(user_id)
-        await update.message.reply_text(t("giveaway_already_entered", entries), parse_mode=ParseMode.MARKDOWN)
-    else:
+    # Enregistrement de l'entrée
+    if user_id not in giveaway_participants:
         giveaway_participants.add(user_id)
         save_and_log()
         entries = compute_entries(user_id)
         ref_count = referral_count.get(user_id, 0)
-        base_entries = 1
-        bonus_entries = ref_count // 2
         await update.message.reply_text(
             t("giveaway_entry_recorded", entries) + "\n" +
-            t("giveaway_compute_entries", base_entries, bonus_entries, entries),
+            t("giveaway_compute_entries", 1, ref_count // 2, entries),
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        entries = compute_entries(user_id)
+        await update.message.reply_text(
+            t("giveaway_already_entered", entries),
             parse_mode=ParseMode.MARKDOWN
         )
 
