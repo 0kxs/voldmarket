@@ -598,16 +598,26 @@ async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
-    # Trier les referrers par nombre de filleuls
     sorted_refs = sorted(referral_count.items(), key=lambda x: x[1], reverse=True)
     top = sorted_refs[:10]
     if not top:
         await update.message.reply_text("No referrals yet.")
         return
+
     text = T["top_referrers_title"]
     for i, (uid, count) in enumerate(top, start=1):
-        username = user_info.get(str(uid), str(uid))
-        text += t("top_referrers_entry", i, username, count)
+        # Essayer d'obtenir le nom depuis user_info, sinon via l'API
+        name = user_info.get(str(uid))
+        if not name:
+            try:
+                chat = await context.bot.get_chat(uid)
+                name = chat.username or chat.first_name or str(uid)
+                # Mettre à jour le stockage pour les prochaines fois
+                user_info[str(uid)] = name
+                save_and_log()
+            except Exception:
+                name = str(uid)
+        text += t("top_referrers_entry", i, name, count)
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
