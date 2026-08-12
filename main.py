@@ -291,6 +291,30 @@ def compute_entries(user_id: int) -> int:
     bonus = refs // 2
     return base + bonus
 
+async def process_giveaway_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> str:
+    """Common giveaway entry logic: checks channel membership, registers user, returns message."""
+    try:
+        chat_member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        status = str(chat_member.status).lower()
+        logging.info(f"Giveaway check for {user_id}: status={status}")
+        if status not in ("creator", "administrator", "member", "restricted"):
+            return T["giveaway_join_channel"]
+    except Exception as e:
+        logging.error(f"Giveaway membership check error: {e}")
+        return "⚠️ An error occurred while verifying channel membership. Please try again later."
+
+    if user_id not in giveaway_participants:
+        giveaway_participants.add(user_id)
+        save_and_log()
+        entries = compute_entries(user_id)
+        ref_count = referral_count.get(user_id, 0)
+        msg = t("giveaway_entry_recorded", entries) + "\n" + \
+              t("giveaway_compute_entries", 1, ref_count // 2, entries)
+    else:
+        entries = compute_entries(user_id)
+        msg = t("giveaway_already_entered", entries)
+    return msg
+
 # ==================== HANDLERS ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -301,23 +325,27 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user_info[str(user_id)] = username
         save_and_log()
 
-    # Gestion du parrainage
+    # Gestion du deep link (giveaway / parrainage)
     if update.message and update.message.text:
         args = update.message.text.split()
-        if len(args) > 1 and args[1].startswith("ref"):
-            try:
-                referrer_id = int(args[1][3:])
-            except:
-                referrer_id = None
-            if referrer_id and referrer_id != user_id and referrer_id in all_users:
-                referral_tree[user_id] = referrer_id
-                referral_count[referrer_id] = referral_count.get(referrer_id, 0) + 1
-                save_and_log()
+        if len(args) > 1:
+            if args[1].startswith("ref"):
                 try:
-                    await context.bot.send_message(referrer_id, T["referrer_join_notify"])
+                    referrer_id = int(args[1][3:])
                 except:
-                    pass
-                await update.message.reply_text(T["referral_join_info"])
+                    referrer_id = None
+                if referrer_id and referrer_id != user_id and referrer_id in all_users:
+                    referral_tree[user_id] = referrer_id
+                    referral_count[referrer_id] = referral_count.get(referrer_id, 0) + 1
+                    save_and_log()
+                    try:
+                        await context.bot.send_message(referrer_id, T["referrer_join_notify"])
+                    except:
+                        pass
+                    await update.message.reply_text(T["referral_join_info"])
+            elif args[1] == "giveaway":
+                msg = await process_giveaway_entry(update, context, user_id)
+                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
     if update.callback_query:
         query = update.callback_query
@@ -563,36 +591,8 @@ async def verify_payment(crypto: str, address: str, expected: float) -> bool:
 # ==================== GIVEAWAY COMMAND ====================
 async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    try:
-        chat_member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        status = str(chat_member.status).lower()   # on normalise en minuscules
-        logging.info(f"Giveaway check for {user_id}: status={status}")
-        if status not in ("creator", "administrator", "member", "restricted"):
-            await update.message.reply_text(T["giveaway_join_channel"])
-            return
-    except Exception as e:
-        logging.error(f"Giveaway membership check error: {e}")
-        await update.message.reply_text(
-            "⚠️ An error occurred while verifying channel membership. Please try again later."
-        )
-        return
-
-    if user_id not in giveaway_participants:
-        giveaway_participants.add(user_id)
-        save_and_log()
-        entries = compute_entries(user_id)
-        ref_count = referral_count.get(user_id, 0)
-        await update.message.reply_text(
-            t("giveaway_entry_recorded", entries) + "\n" +
-            t("giveaway_compute_entries", 1, ref_count // 2, entries),
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    else:
-        entries = compute_entries(user_id)
-        await update.message.reply_text(
-            t("giveaway_already_entered", entries),
-            parse_mode=ParseMode.MARKDOWN,
-        )
+    msg = await process_giveaway_entry(update, context, user_id)
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 # ==================== ADMIN COMMANDS (enriched) ====================
 async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
