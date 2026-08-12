@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – English only, persistent data, interactive admin panel, manual stock control."""
+"""Vold Market Bot – English only, persistent data, interactive admin panel, manual stock control, giveaway."""
 
 import asyncio
 import json
@@ -9,7 +9,7 @@ import random
 from typing import Dict, Set
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ParseMode
+from telegram.constants import ParseMode, ChatMemberStatus
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -50,8 +50,11 @@ def load_data():
         referral_count_dict = {int(k): v for k, v in data.get("ref_count", {}).items()}
         tiers = data.get("multipliers", None)
         saved_stock = data.get("stock", {"ETH": 87471.0, "BTC": 51785.0})
-        return all_users_set, referral_tree_dict, referral_count_dict, tiers, saved_stock
-    return set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0}
+        giveaway_participants_set = set(data.get("giveaway_participants", []))
+        user_info_dict = {int(k): v for k, v in data.get("user_info", {}).items()}
+        return (all_users_set, referral_tree_dict, referral_count_dict, tiers, saved_stock,
+                giveaway_participants_set, user_info_dict)
+    return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0}, set(), {})
 
 def save_data():
     data = {
@@ -60,11 +63,16 @@ def save_data():
         "ref_count": {str(k): v for k, v in referral_count.items()},
         "multipliers": list(MULTIPLIER_TIERS),
         "stock": STOCK,
+        "giveaway_participants": list(giveaway_participants),
+        "user_info": user_info,
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-all_users, referral_tree, referral_count, saved_tiers, saved_stock = load_data()
+# Initialisation des variables globales
+(all_users, referral_tree, referral_count, saved_tiers, saved_stock,
+ giveaway_participants, user_info) = load_data()
+
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
 else:
@@ -198,8 +206,15 @@ A: Guide provided with purchase.""",
         "📊 *Bot Statistics*\n"
         "Total users: {}\n"
         "Referral participants: {}\n"
-        "Total referral links used: {}"
+        "Total referral links used: {}\n"
+        "Giveaway participants: {}"
     ),
+    "top_referrers_title": "🏆 *Top Referrers*\n\n",
+    "top_referrers_entry": "{}. {} – {} referrals\n",
+    "giveaway_join_channel": "⚠️ You must join @voldmarket to participate in the giveaway.",
+    "giveaway_entry_recorded": "✅ Entry recorded! You now have *{}* entries.",
+    "giveaway_already_entered": "ℹ️ You are already entered. You have *{}* entries.",
+    "giveaway_compute_entries": "{} entry from joining + {} from referrals = *{}* total",
     "rates_header": "📊 *Current Multiplier Tiers*\n\n",
     "admin_panel": "🛠️ *Admin Panel*\nChoose an action:",
     "rates_updated": "✅ Multiplier tiers updated.",
@@ -209,6 +224,7 @@ A: Guide provided with purchase.""",
         "🛠️ *Admin Commands*\n\n"
         "/admin – Open interactive admin panel\n"
         "/stats – Show bot statistics\n"
+        "/top – Show top referrers\n"
         "/dmall [message] – Send a broadcast message to all users (optional custom message)\n"
         "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
         "/setstock <ETH|BTC> <value> – Manually set the available stock for a coin\n"
@@ -268,13 +284,24 @@ async def stock_updater():
         logging.info(f"Stocks updated: ETH={STOCK['ETH']}, BTC={STOCK['BTC']}")
         await asyncio.sleep(30 * 60)
 
+# ==================== GIVEAWAY LOGIC ====================
+def compute_entries(user_id: int) -> int:
+    base = 1 if user_id in giveaway_participants else 0
+    refs = referral_count.get(user_id, 0)
+    bonus = refs // 2
+    return base + bonus
+
 # ==================== HANDLERS ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+    # Enregistrer l'utilisateur et son nom
     if user_id not in all_users:
         all_users.add(user_id)
+        username = update.effective_user.username or update.effective_user.first_name or str(user_id)
+        user_info[str(user_id)] = username
         save_and_log()
 
+    # Gestion du parrainage
     if update.message and update.message.text:
         args = update.message.text.split()
         if len(args) > 1 and args[1].startswith("ref"):
@@ -468,7 +495,6 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     except Exception as e:
         logging.error(f"Failed to edit message after payment check: {e}")
         try:
-            # Envoyer un nouveau message avec le bouton Cancel
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
@@ -516,12 +542,10 @@ async def cancel_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     user_id = query.from_user.id
 
-    # Annuler d'éventuelles revérifications
     if user_id in pending_checks:
         pending_checks[user_id].cancel()
         del pending_checks[user_id]
 
-    # Essayer d'éditer le message pour afficher "Purchase cancelled."
     try:
         await query.edit_message_text("Purchase cancelled.")
     except Exception:
@@ -530,12 +554,73 @@ async def cancel_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             text="Purchase cancelled."
         )
 
-    # Ramener l'utilisateur au menu principal
     await cmd_start(update, context)
     return ConversationHandler.END
 
 async def verify_payment(crypto: str, address: str, expected: float) -> bool:
     return False
+
+# ==================== GIVEAWAY COMMAND ====================
+async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    # Vérifier l'appartenance au canal
+    try:
+        chat_member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
+        if chat_member.status not in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR):
+            await update.message.reply_text(T["giveaway_join_channel"])
+            return
+    except Exception:
+        await update.message.reply_text("⚠️ Unable to verify channel membership. Please try again.")
+        return
+
+    # L'utilisateur est membre du canal
+    if user_id in giveaway_participants:
+        entries = compute_entries(user_id)
+        await update.message.reply_text(t("giveaway_already_entered", entries), parse_mode=ParseMode.MARKDOWN)
+    else:
+        giveaway_participants.add(user_id)
+        save_and_log()
+        entries = compute_entries(user_id)
+        ref_count = referral_count.get(user_id, 0)
+        base_entries = 1
+        bonus_entries = ref_count // 2
+        await update.message.reply_text(
+            t("giveaway_entry_recorded", entries) + "\n" +
+            t("giveaway_compute_entries", base_entries, bonus_entries, entries),
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+# ==================== ADMIN COMMANDS (enriched) ====================
+async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    # Trier les referrers par nombre de filleuls
+    sorted_refs = sorted(referral_count.items(), key=lambda x: x[1], reverse=True)
+    top = sorted_refs[:10]
+    if not top:
+        await update.message.reply_text("No referrals yet.")
+        return
+    text = T["top_referrers_title"]
+    for i, (uid, count) in enumerate(top, start=1):
+        username = user_info.get(str(uid), str(uid))
+        text += t("top_referrers_entry", i, username, count)
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    total_refs = len(referral_tree)
+    total_links = sum(referral_count.values())
+    giveaway_count = len(giveaway_participants)
+    await update.message.reply_text(
+        t("stats_text", len(all_users), total_refs, total_links, giveaway_count),
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await update.message.reply_text(T["help_text"], parse_mode=ParseMode.MARKDOWN)
 
 # ==================== ADMIN PANEL ====================
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -586,7 +671,8 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif data == "admin_stats":
         total_refs = len(referral_tree)
         total_links = sum(referral_count.values())
-        text = t("stats_text", len(all_users), total_refs, total_links)
+        giveaway_count = len(giveaway_participants)
+        text = t("stats_text", len(all_users), total_refs, total_links, giveaway_count)
         await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
     elif data == "admin_close":
@@ -594,22 +680,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif data == "admin_back":
         await query.edit_message_text(T["admin_panel"], reply_markup=admin_menu(), parse_mode=ParseMode.MARKDOWN)
 
-# ==================== COMMANDS ====================
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user.id != ADMIN_ID:
-        return
-    await update.message.reply_text(T["help_text"], parse_mode=ParseMode.MARKDOWN)
-
-async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user.id != ADMIN_ID:
-        return
-    total_refs = len(referral_tree)
-    total_links = sum(referral_count.values())
-    await update.message.reply_text(
-        t("stats_text", len(all_users), total_refs, total_links),
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
+# ==================== OTHER COMMANDS ====================
 async def cmd_dmall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
@@ -698,10 +769,15 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(referral|rates|faq|tos|support|back)$"))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
 
+    # Commandes publiques
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("giveaway", cmd_giveaway))
+
+    # Commandes admin
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("top", cmd_top))
     app.add_handler(CommandHandler("dmall", cmd_dmall))
     app.add_handler(CommandHandler("setrates", cmd_setrates))
     app.add_handler(CommandHandler("setstock", cmd_setstock))
