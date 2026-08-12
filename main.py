@@ -565,12 +565,9 @@ async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = update.effective_user.id
     try:
         chat_member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        if chat_member.status not in (
-            ChatMemberStatus.MEMBER,
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.CREATOR,
-            ChatMemberStatus.RESTRICTED,
-        ):
+        status = str(chat_member.status).lower()   # on normalise en minuscules
+        logging.info(f"Giveaway check for {user_id}: status={status}")
+        if status not in ("creator", "administrator", "member", "restricted"):
             await update.message.reply_text(T["giveaway_join_channel"])
             return
     except Exception as e:
@@ -580,7 +577,6 @@ async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    # Enregistrement de l'entrée
     if user_id not in giveaway_participants:
         giveaway_participants.add(user_id)
         save_and_log()
@@ -589,13 +585,13 @@ async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(
             t("giveaway_entry_recorded", entries) + "\n" +
             t("giveaway_compute_entries", 1, ref_count // 2, entries),
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
         )
     else:
         entries = compute_entries(user_id)
         await update.message.reply_text(
             t("giveaway_already_entered", entries),
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.MARKDOWN,
         )
 
 # ==================== ADMIN COMMANDS (enriched) ====================
