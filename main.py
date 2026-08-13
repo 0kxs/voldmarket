@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – English only, persistent data, interactive admin panel, manual stock control, giveaway."""
+"""Vold Market Bot – English only, persistent data, interactive admin panel, manual stock control, giveaway, ban system."""
 
 import asyncio
 import json
@@ -52,9 +52,10 @@ def load_data():
         saved_stock = data.get("stock", {"ETH": 87471.0, "BTC": 51785.0})
         giveaway_participants_set = set(data.get("giveaway_participants", []))
         user_info_dict = {int(k): v for k, v in data.get("user_info", {}).items()}
+        banned_users_set = set(data.get("banned_users", []))
         return (all_users_set, referral_tree_dict, referral_count_dict, tiers, saved_stock,
-                giveaway_participants_set, user_info_dict)
-    return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0}, set(), {})
+                giveaway_participants_set, user_info_dict, banned_users_set)
+    return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0}, set(), {}, set())
 
 def save_data():
     data = {
@@ -65,13 +66,14 @@ def save_data():
         "stock": STOCK,
         "giveaway_participants": list(giveaway_participants),
         "user_info": user_info,
+        "banned_users": list(banned_users),
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
 # Initialisation des variables globales
 (all_users, referral_tree, referral_count, saved_tiers, saved_stock,
- giveaway_participants, user_info) = load_data()
+ giveaway_participants, user_info, banned_users) = load_data()
 
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
@@ -228,11 +230,19 @@ A: Guide provided with purchase.""",
         "/dmall [message] – Send a broadcast message to all users (optional custom message)\n"
         "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
         "/setstock <ETH|BTC> <value> – Manually set the available stock for a coin\n"
+        "/ban <user_id> – Ban a user from the bot\n"
+        "/unban <user_id> – Unban a user\n"
         "/help – Show this help"
     ),
     "stock_updated": "✅ Stock for {} set to ${:,.2f}",
     "stock_usage": "Usage: /setstock <ETH|BTC> <value>",
     "stock_invalid_coin": "❌ Unknown coin. Use ETH or BTC.",
+    "user_banned": "🚫 You are banned from using this bot.",
+    "ban_success": "✅ User {} has been banned.",
+    "unban_success": "✅ User {} has been unbanned.",
+    "unban_not_found": "User {} is not banned.",
+    "ban_usage": "Usage: /ban <user_id>",
+    "unban_usage": "Usage: /unban <user_id>",
 }
 
 # ==================== GLOBALS ====================
@@ -274,6 +284,9 @@ def admin_menu() -> InlineKeyboardMarkup:
 def save_and_log():
     save_data()
     logging.info("Data saved.")
+
+def is_user_banned(user_id: int) -> bool:
+    return user_id in banned_users
 
 # ==================== STOCK UPDATER ====================
 async def stock_updater():
@@ -318,6 +331,11 @@ async def process_giveaway_entry(update: Update, context: ContextTypes.DEFAULT_T
 # ==================== HANDLERS ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+    # Vérification du bannissement
+    if is_user_banned(user_id):
+        await update.message.reply_text(T["user_banned"])
+        return
+
     # Enregistrer l'utilisateur et son nom
     if user_id not in all_users:
         all_users.add(user_id)
@@ -360,6 +378,11 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     data = query.data
     user_id = query.from_user.id
 
+    # Vérification du bannissement
+    if is_user_banned(user_id):
+        await query.answer(T["user_banned"], show_alert=True)
+        return
+
     if data == "rates":
         text = T["rates_header"]
         for low, high, mult in MULTIPLIER_TIERS:
@@ -385,6 +408,13 @@ AMOUNT, COIN_RECEIVE, ADDRESS_RECEIVE, PAYMENT_METHOD, PAYMENT = range(5)
 async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    user_id = query.from_user.id
+
+    # Vérification du bannissement
+    if is_user_banned(user_id):
+        await query.answer(T["user_banned"], show_alert=True)
+        return ConversationHandler.END
+
     await query.edit_message_text(T["buy_prompt"])
     return AMOUNT
 
@@ -591,10 +621,13 @@ async def verify_payment(crypto: str, address: str, expected: float) -> bool:
 # ==================== GIVEAWAY COMMAND ====================
 async def cmd_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+    if is_user_banned(user_id):
+        await update.message.reply_text(T["user_banned"])
+        return
     msg = await process_giveaway_entry(update, context, user_id)
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
-# ==================== ADMIN COMMANDS (enriched) ====================
+# ==================== ADMIN COMMANDS ====================
 async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
@@ -606,13 +639,11 @@ async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     text = T["top_referrers_title"]
     for i, (uid, count) in enumerate(top, start=1):
-        # Essayer d'obtenir le nom depuis user_info, sinon via l'API
         name = user_info.get(str(uid))
         if not name:
             try:
                 chat = await context.bot.get_chat(uid)
                 name = chat.username or chat.first_name or str(uid)
-                # Mettre à jour le stockage pour les prochaines fois
                 user_info[str(uid)] = name
                 save_and_log()
             except Exception:
@@ -635,6 +666,40 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text(T["help_text"], parse_mode=ParseMode.MARKDOWN)
+
+# ==================== BAN COMMANDS ====================
+async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text(T["ban_usage"])
+        return
+    try:
+        target = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID.")
+        return
+    banned_users.add(target)
+    save_and_log()
+    await update.message.reply_text(t("ban_success", target))
+
+async def cmd_unban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text(T["unban_usage"])
+        return
+    try:
+        target = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID.")
+        return
+    if target in banned_users:
+        banned_users.remove(target)
+        save_and_log()
+        await update.message.reply_text(t("unban_success", target))
+    else:
+        await update.message.reply_text(t("unban_not_found", target))
 
 # ==================== ADMIN PANEL ====================
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -704,6 +769,8 @@ async def cmd_dmall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         message = T["flash_sale_message"]
     success = 0
     for uid in all_users:
+        if uid in banned_users:
+            continue
         try:
             await context.bot.send_message(uid, message, parse_mode=ParseMode.MARKDOWN)
             success += 1
@@ -795,6 +862,8 @@ def main() -> None:
     app.add_handler(CommandHandler("dmall", cmd_dmall))
     app.add_handler(CommandHandler("setrates", cmd_setrates))
     app.add_handler(CommandHandler("setstock", cmd_setstock))
+    app.add_handler(CommandHandler("ban", cmd_ban))
+    app.add_handler(CommandHandler("unban", cmd_unban))
 
     print("Bot running...")
     app.run_polling()
