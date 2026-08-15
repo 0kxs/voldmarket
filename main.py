@@ -237,6 +237,7 @@ A: Guide provided with purchase.""",
         "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
         "/setstock <ETH|BTC|SOL> <value> – Manually set the available stock for a coin\n"
         "/promo <coin> <min_amount> <bonus> – Activate a promo (e.g. /promo SOL 50 100)\n"
+        "/delpromo <coin> – Remove an active promo for a coin"
         "/ban <user_id> – Ban a user from the bot\n"
         "/unban <user_id> – Unban a user\n"
         "/help – Show this help"
@@ -714,6 +715,20 @@ async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     save_and_log()
     await update.message.reply_text(t("promo_activated", coin, bonus, min_amount))
 
+async def cmd_delpromo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args or len(context.args) != 1:
+        await update.message.reply_text("Usage: /delpromo <coin>")
+        return
+    coin = context.args[0].upper()
+    if coin in ACTIVE_PROMOS:
+        del ACTIVE_PROMOS[coin]
+        save_and_log()
+        await update.message.reply_text(f"✅ Promo for {coin} has been removed.")
+    else:
+        await update.message.reply_text(f"No active promo for {coin}.")
+
 # ==================== BAN COMMANDS ====================
 async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
@@ -910,6 +925,7 @@ def main() -> None:
     app.add_handler(CommandHandler("setrates", cmd_setrates))
     app.add_handler(CommandHandler("setstock", cmd_setstock))
     app.add_handler(CommandHandler("promo", cmd_promo))
+    app.add_handler(CommandHandler("delpromo", cmd_delpromo))
     app.add_handler(CommandHandler("ban", cmd_ban))
     app.add_handler(CommandHandler("unban", cmd_unban))
 
