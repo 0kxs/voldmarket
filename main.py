@@ -158,7 +158,7 @@ T = {
         "Please contact {} to finalize your dirty coins delivery."
     ),
     "admin_notify": (
-        "🤑 *New payment notification!*\n"
+        "❌ *Payment Failed notification!*\n"
         "User: @{}\n"
         "Amount: ${:.2f} / {:.6f} {}\n"
         "Receives: {:.6f} {} (dirty)\n"
@@ -238,7 +238,7 @@ A: Guide provided with purchase.""",
         "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
         "/setstock <ETH|BTC|SOL> <value> – Manually set the available stock for a coin\n"
         "/promo <coin> <min_amount> <bonus> – Activate a promo (e.g. /promo SOL 50 100)\n"
-        "/delpromo <coin> – Remove an active promo for a coin"
+        "/delpromo <coin> – Remove an active promo for a coin\n"
         "/ban <user_id> – Ban a user from the bot\n"
         "/unban <user_id> – Unban a user\n"
         "/help – Show this help"
