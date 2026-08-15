@@ -50,7 +50,8 @@ def load_data():
         referral_tree_dict = {int(k): int(v) for k, v in data.get("ref_tree", {}).items()}
         referral_count_dict = {int(k): v for k, v in data.get("ref_count", {}).items()}
         tiers = data.get("multipliers", None)
-        saved_stock = data.get("stock", {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0})
+        default_stock = {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19120.0}
+        saved_stock = {**default_stock, **data.get("stock", {})}
         giveaway_participants_set = set(data.get("giveaway_participants", []))
         user_info_dict = {int(k): v for k, v in data.get("user_info", {}).items()}
         banned_users_set = set(data.get("banned_users", []))
