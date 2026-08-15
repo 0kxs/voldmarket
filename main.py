@@ -35,6 +35,7 @@ CRYPTO_ADDRESSES = {
     "LTC": "ltc1q578p84ulz63l83ce467lcunjusp2zd7gpcazf2",
     "BNB": "0xebfd3EDFCD40F5D739043f7482e0946Ff0afA4E3",
     "USDT_TRC20": "TPc4mnpRSETfY9yofenXLmf2GD6qGZnzwa",
+    "USDT_ERC20": "0xebfd3EDFCD40F5D739043f7482e0946Ff0afA4E3",  # same as ETH
     "XMR": "48hjiNMpfpQ8BfLe1Hy6P7MxZM4WXvXLggAdc3Er4Pzs6W5dDYStBzzKB9VWcBCNZHDuoexKTT9HJYoCR1GZX6Qs4M7a3YW",
 }
 
@@ -49,13 +50,14 @@ def load_data():
         referral_tree_dict = {int(k): int(v) for k, v in data.get("ref_tree", {}).items()}
         referral_count_dict = {int(k): v for k, v in data.get("ref_count", {}).items()}
         tiers = data.get("multipliers", None)
-        saved_stock = data.get("stock", {"ETH": 87471.0, "BTC": 51785.0})
+        saved_stock = data.get("stock", {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0})
         giveaway_participants_set = set(data.get("giveaway_participants", []))
         user_info_dict = {int(k): v for k, v in data.get("user_info", {}).items()}
         banned_users_set = set(data.get("banned_users", []))
+        active_promos_dict = {k: v for k, v in data.get("active_promos", {}).items()}
         return (all_users_set, referral_tree_dict, referral_count_dict, tiers, saved_stock,
-                giveaway_participants_set, user_info_dict, banned_users_set)
-    return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0}, set(), {}, set())
+                giveaway_participants_set, user_info_dict, banned_users_set, active_promos_dict)
+    return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0}, set(), {}, set(), {})
 
 def save_data():
     data = {
@@ -67,13 +69,14 @@ def save_data():
         "giveaway_participants": list(giveaway_participants),
         "user_info": user_info,
         "banned_users": list(banned_users),
+        "active_promos": ACTIVE_PROMOS,
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
 # Initialisation des variables globales
 (all_users, referral_tree, referral_count, saved_tiers, saved_stock,
- giveaway_participants, user_info, banned_users) = load_data()
+ giveaway_participants, user_info, banned_users, ACTIVE_PROMOS) = load_data()
 
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
@@ -94,6 +97,7 @@ PRICE = {
     "LTC": 44.83,
     "BNB": 592.89,
     "USDT_TRC20": 1.0,
+    "USDT_ERC20": 1.0,
     "XMR": 360.70,
 }
 
@@ -193,7 +197,7 @@ Q: Middleman?
 A: Yes, middleman accepted at your fees.
 
 Q: Delivery time?
-A: Usually under 30 minutes.
+A: Usually under 5 minutes.
 
 Q: Anonymity?
 A: We don't ask for personal info. Your privacy depends on your own setup.
@@ -218,6 +222,8 @@ A: Guide provided with purchase.""",
     "giveaway_already_entered": "ℹ️ You are already entered. You have *{}* entries.",
     "giveaway_compute_entries": "{} entry from joining + {} from referrals = *{}* total",
     "rates_header": "📊 *Current Multiplier Tiers*\n\n",
+    "rates_promo": "\n🎁 *Active Promotions:*\n",
+    "promo_info": "{}: +${} bonus for purchases of ${}+",
     "admin_panel": "🛠️ *Admin Panel*\nChoose an action:",
     "rates_updated": "✅ Multiplier tiers updated.",
     "rates_reset": "✅ Multiplier tiers reset to default.",
@@ -229,20 +235,24 @@ A: Guide provided with purchase.""",
         "/top – Show top referrers\n"
         "/dmall [message] – Send a broadcast message to all users (optional custom message)\n"
         "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
-        "/setstock <ETH|BTC> <value> – Manually set the available stock for a coin\n"
+        "/setstock <ETH|BTC|SOL> <value> – Manually set the available stock for a coin\n"
+        "/promo <coin> <min_amount> <bonus> – Activate a promo (e.g. /promo SOL 50 100)\n"
         "/ban <user_id> – Ban a user from the bot\n"
         "/unban <user_id> – Unban a user\n"
         "/help – Show this help"
     ),
     "stock_updated": "✅ Stock for {} set to ${:,.2f}",
-    "stock_usage": "Usage: /setstock <ETH|BTC> <value>",
-    "stock_invalid_coin": "❌ Unknown coin. Use ETH or BTC.",
+    "stock_usage": "Usage: /setstock <ETH|BTC|SOL> <value>",
+    "stock_invalid_coin": "❌ Unknown coin. Use ETH, BTC or SOL.",
     "user_banned": "🚫 You are banned from using this bot.",
     "ban_success": "✅ User {} has been banned.",
     "unban_success": "✅ User {} has been unbanned.",
     "unban_not_found": "User {} is not banned.",
     "ban_usage": "Usage: /ban <user_id>",
     "unban_usage": "Usage: /unban <user_id>",
+    "promo_activated": "✅ Promo activated: {}. Bonus ${} for purchases over ${}.",
+    "promo_usage": "Usage: /promo <coin> <min_amount> <bonus>",
+    "promo_invalid_coin": "❌ Invalid coin. Available: ETH, BTC, SOL.",
 }
 
 # ==================== GLOBALS ====================
@@ -291,10 +301,10 @@ def is_user_banned(user_id: int) -> bool:
 # ==================== STOCK UPDATER ====================
 async def stock_updater():
     while True:
-        for coin in ("ETH", "BTC"):
+        for coin in ("ETH", "BTC", "SOL"):
             STOCK[coin] = round(max(0.0, STOCK[coin] + random.uniform(-3000, 3000)), 2)
         save_and_log()
-        logging.info(f"Stocks updated: ETH={STOCK['ETH']}, BTC={STOCK['BTC']}")
+        logging.info(f"Stocks updated: ETH={STOCK['ETH']}, BTC={STOCK['BTC']}, SOL={STOCK['SOL']}")
         await asyncio.sleep(30 * 60)
 
 # ==================== GIVEAWAY LOGIC ====================
@@ -331,19 +341,16 @@ async def process_giveaway_entry(update: Update, context: ContextTypes.DEFAULT_T
 # ==================== HANDLERS ====================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
-    # Vérification du bannissement
     if is_user_banned(user_id):
         await update.message.reply_text(T["user_banned"])
         return
 
-    # Enregistrer l'utilisateur et son nom
     if user_id not in all_users:
         all_users.add(user_id)
         username = update.effective_user.username or update.effective_user.first_name or str(user_id)
         user_info[str(user_id)] = username
         save_and_log()
 
-    # Gestion du deep link (giveaway / parrainage)
     if update.message and update.message.text:
         args = update.message.text.split()
         if len(args) > 1:
@@ -378,7 +385,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     data = query.data
     user_id = query.from_user.id
 
-    # Vérification du bannissement
     if is_user_banned(user_id):
         await query.answer(T["user_banned"], show_alert=True)
         return
@@ -387,7 +393,13 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         text = T["rates_header"]
         for low, high, mult in MULTIPLIER_TIERS:
             text += f"${low}-${high if high < float('inf') else '+'}: x{mult}\n"
-        text += f"\n💰 *Available stock*: ETH ${STOCK['ETH']:,.0f}, BTC ${STOCK['BTC']:,.0f}"
+        text += f"\n💰 *Available stock*: ETH ${STOCK['ETH']:,.0f}, BTC ${STOCK['BTC']:,.0f}, SOL ${STOCK['SOL']:,.0f}"
+
+        # Afficher les promos actives
+        if ACTIVE_PROMOS:
+            text += T["rates_promo"]
+            for coin, promo in ACTIVE_PROMOS.items():
+                text += t("promo_info", coin, promo["bonus"], promo["min"]) + "\n"
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "faq":
         await query.edit_message_text(T["faq_text"], reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
@@ -410,7 +422,6 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     user_id = query.from_user.id
 
-    # Vérification du bannissement
     if is_user_banned(user_id):
         await query.answer(T["user_banned"], show_alert=True)
         return ConversationHandler.END
@@ -432,6 +443,7 @@ async def amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     keyboard = [
         [InlineKeyboardButton("BTC", callback_data="receive_BTC")],
         [InlineKeyboardButton("ETH", callback_data="receive_ETH")],
+        [InlineKeyboardButton("SOL", callback_data="receive_SOL")],
         [InlineKeyboardButton(T["cancel"], callback_data="cancel")],
     ]
     await update.message.reply_text(T["choose_receive_coin"], reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
@@ -449,6 +461,13 @@ async def coin_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     pay_amount = context.user_data["pay_amount"]
     multiplier = context.user_data["multiplier"]
     receive_value = pay_amount * multiplier
+
+    # Appliquer une promotion si active pour cette crypto
+    if coin in ACTIVE_PROMOS:
+        promo = ACTIVE_PROMOS[coin]
+        if pay_amount >= promo["min"]:
+            receive_value += promo["bonus"]  # bonus en USD
+            logging.info(f"Promo applied: +${promo['bonus']} for {coin} purchase of ${pay_amount}")
 
     if coin in STOCK and receive_value > STOCK[coin]:
         await query.edit_message_text(
@@ -475,17 +494,25 @@ async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if coin == "BTC":
         if address.startswith(("1", "3", "bc1")) and 26 <= len(address) <= 62:
             valid = True
-    elif coin == "ETH":
+    elif coin in ("ETH", "SOL"):
         if address.startswith("0x") and len(address) == 42:
+            valid = True  # SOL adresses are 44 chars base58, but we can keep simple for now
+    # SOL address validation is more complex; for simplicity we accept base58 strings between 32 and 44 chars
+    if not valid and coin == "SOL":
+        if 32 <= len(address) <= 44 and address.isalnum():
             valid = True
     if not valid:
         await update.message.reply_text(t("invalid_address", coin))
         return ADDRESS_RECEIVE
     context.user_data["receive_address"] = address
-    payment_methods = ["BTC", "ETH", "SOL", "LTC", "BNB", "USDT_TRC20", "XMR"]
+    payment_methods = ["BTC", "ETH", "SOL", "LTC", "BNB", "USDT_TRC20", "USDT_ERC20", "XMR"]
     keyboard = []
     for p in payment_methods:
-        label = p if p != "USDT_TRC20" else "USDT (TRC-20)"
+        label = p
+        if p == "USDT_TRC20":
+            label = "USDT (TRC-20)"
+        elif p == "USDT_ERC20":
+            label = "USDT (ERC-20)"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"paymethod_{p}")])
     keyboard.append([InlineKeyboardButton(T["cancel"], callback_data="cancel")])
     await update.message.reply_text(T["choose_payment_method"], reply_markup=InlineKeyboardMarkup(keyboard))
@@ -498,7 +525,7 @@ async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text("Purchase cancelled.")
         await cmd_start(update, context)
         return ConversationHandler.END
-    pay_coin = query.data.split("_")[1]
+    pay_coin = query.data.split("_", 1)[1]  # because USDT_ERC20 contains underscore
     context.user_data["pay_coin"] = pay_coin
     pay_amount = context.user_data["pay_amount"]
     price = PRICE.get(pay_coin, 1.0)
@@ -546,7 +573,7 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                        receive_address)
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
 
-    # Mise à jour du message utilisateur avec gestion d'erreur
+    # Mise à jour du message utilisateur
     try:
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
         await query.edit_message_text(T["no_payment"], reply_markup=keyboard)
@@ -562,7 +589,6 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         except Exception as e2:
             logging.error(f"Could not send new payment message: {e2}")
 
-    # Planifier une revérification après 60 secondes
     if user_id in pending_checks:
         pending_checks[user_id].cancel()
     task = asyncio.create_task(recheck_payment_after_delay(
@@ -666,6 +692,27 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text(T["help_text"], parse_mode=ParseMode.MARKDOWN)
+
+# ==================== PROMO COMMAND ====================
+async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args or len(context.args) != 3:
+        await update.message.reply_text(T["promo_usage"])
+        return
+    coin = context.args[0].upper()
+    if coin not in ("ETH", "BTC", "SOL"):
+        await update.message.reply_text(T["promo_invalid_coin"])
+        return
+    try:
+        min_amount = float(context.args[1])
+        bonus = float(context.args[2])
+    except ValueError:
+        await update.message.reply_text(T["promo_usage"])
+        return
+    ACTIVE_PROMOS[coin] = {"min": min_amount, "bonus": bonus}
+    save_and_log()
+    await update.message.reply_text(t("promo_activated", coin, bonus, min_amount))
 
 # ==================== BAN COMMANDS ====================
 async def cmd_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -862,6 +909,7 @@ def main() -> None:
     app.add_handler(CommandHandler("dmall", cmd_dmall))
     app.add_handler(CommandHandler("setrates", cmd_setrates))
     app.add_handler(CommandHandler("setstock", cmd_setstock))
+    app.add_handler(CommandHandler("promo", cmd_promo))
     app.add_handler(CommandHandler("ban", cmd_ban))
     app.add_handler(CommandHandler("unban", cmd_unban))
 
