@@ -693,7 +693,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
-    await update.message.reply_text(T["help_text"], parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(T["help_text"])
 
 # ==================== PROMO COMMAND ====================
 async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
