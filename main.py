@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – English only, persistent data, interactive admin panel, manual stock control, giveaway, ban system."""
+"""Vold Market Bot – English only, persistent data, dynamic prices, bounded stock, enhanced admin panel."""
 
 import asyncio
 import json
@@ -8,6 +8,7 @@ import os
 import random
 from typing import Dict, Set
 
+import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode, ChatMemberStatus
 from telegram.ext import (
@@ -35,7 +36,7 @@ CRYPTO_ADDRESSES = {
     "LTC": "ltc1q578p84ulz63l83ce467lcunjusp2zd7gpcazf2",
     "BNB": "0xebfd3EDFCD40F5D739043f7482e0946Ff0afA4E3",
     "USDT_TRC20": "TPc4mnpRSETfY9yofenXLmf2GD6qGZnzwa",
-    "USDT_ERC20": "0xebfd3EDFCD40F5D739043f7482e0946Ff0afA4E3",  # same as ETH
+    "USDT_ERC20": "0xebfd3EDFCD40F5D739043f7482e0946Ff0afA4E3",
     "XMR": "48hjiNMpfpQ8BfLe1Hy6P7MxZM4WXvXLggAdc3Er4Pzs6W5dDYStBzzKB9VWcBCNZHDuoexKTT9HJYoCR1GZX6Qs4M7a3YW",
 }
 
@@ -52,13 +53,18 @@ def load_data():
         tiers = data.get("multipliers", None)
         default_stock = {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19120.0}
         saved_stock = {**default_stock, **data.get("stock", {})}
+        # Charger les cibles de stock si existantes, sinon copier le stock actuel
+        default_target = saved_stock.copy()
+        saved_target = {**default_target, **data.get("stock_target", {})}
         giveaway_participants_set = set(data.get("giveaway_participants", []))
         user_info_dict = {int(k): v for k, v in data.get("user_info", {}).items()}
         banned_users_set = set(data.get("banned_users", []))
         active_promos_dict = {k: v for k, v in data.get("active_promos", {}).items()}
         return (all_users_set, referral_tree_dict, referral_count_dict, tiers, saved_stock,
-                giveaway_participants_set, user_info_dict, banned_users_set, active_promos_dict)
-    return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0}, set(), {}, set(), {})
+                giveaway_participants_set, user_info_dict, banned_users_set, active_promos_dict,
+                saved_target)
+    return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0}, set(), {}, set(), {},
+            {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0})
 
 def save_data():
     data = {
@@ -67,6 +73,7 @@ def save_data():
         "ref_count": {str(k): v for k, v in referral_count.items()},
         "multipliers": list(MULTIPLIER_TIERS),
         "stock": STOCK,
+        "stock_target": STOCK_TARGET,
         "giveaway_participants": list(giveaway_participants),
         "user_info": user_info,
         "banned_users": list(banned_users),
@@ -77,7 +84,7 @@ def save_data():
 
 # Initialisation des variables globales
 (all_users, referral_tree, referral_count, saved_tiers, saved_stock,
- giveaway_participants, user_info, banned_users, ACTIVE_PROMOS) = load_data()
+ giveaway_participants, user_info, banned_users, ACTIVE_PROMOS, STOCK_TARGET) = load_data()
 
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
@@ -90,6 +97,10 @@ else:
     ]
 
 STOCK = saved_stock
+# Assurer que STOCK_TARGET contient toutes les clés
+for coin in STOCK:
+    if coin not in STOCK_TARGET:
+        STOCK_TARGET[coin] = STOCK[coin]
 
 PRICE = {
     "BTC": 64180.26,
@@ -102,8 +113,21 @@ PRICE = {
     "XMR": 360.70,
 }
 
+# IDs CoinGecko pour mise à jour automatique
+COINGECKO_IDS = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "SOL": "solana",
+    "LTC": "litecoin",
+    "BNB": "binancecoin",
+    "USDT_TRC20": "tether",
+    "USDT_ERC20": "tether",
+    "XMR": "monero",
+}
+
 # ==================== TRANSLATIONS ====================
 T = {
+    # (inchangé, garder la même structure)
     "start": (
         "🤖 *Vold Market Bot*\n"
         "Official bot of @voldmarket\n\n"
@@ -158,7 +182,7 @@ T = {
         "Please contact {} to finalize your dirty coins delivery."
     ),
     "admin_notify": (
-        "❌ *Payment Failed notification!*\n"
+        "🤑 *New payment notification!*\n"
         "User: @{}\n"
         "Amount: ${:.2f} / {:.6f} {}\n"
         "Receives: {:.6f} {} (dirty)\n"
@@ -255,6 +279,11 @@ A: Guide provided with purchase.""",
     "promo_activated": "✅ Promo activated: {}. Bonus ${} for purchases over ${}.",
     "promo_usage": "Usage: /promo <coin> <min_amount> <bonus>",
     "promo_invalid_coin": "❌ Invalid coin. Available: ETH, BTC, SOL.",
+    # Nouvelles clés pour l'admin panel enrichi
+    "admin_stock_title": "💰 *Current Stock*\n\n",
+    "admin_promo_title": "🎁 *Active Promos*\n\n",
+    "admin_no_promo": "No active promos.",
+    "admin_promo_remove_instruction": "Use /delpromo <coin> to remove.",
 }
 
 # ==================== GLOBALS ====================
@@ -288,10 +317,29 @@ def admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("➕ Add Tier (use /setrates)", callback_data="admin_add_tier")],
         [InlineKeyboardButton("❌ Delete Last Tier", callback_data="admin_del_tier")],
         [InlineKeyboardButton("🔄 Reset Default", callback_data="admin_reset_rates")],
+        [InlineKeyboardButton("💰 Manage Stocks", callback_data="admin_stock_menu")],
+        [InlineKeyboardButton("🎁 Manage Promos", callback_data="admin_promo_menu")],
         [InlineKeyboardButton("📢 DMALL", callback_data="admin_dmall")],
         [InlineKeyboardButton("📈 Stats", callback_data="admin_stats")],
         [InlineKeyboardButton("🔙 Close Panel", callback_data="admin_close")],
     ])
+
+def admin_stock_menu() -> InlineKeyboardMarkup:
+    buttons = []
+    for coin in ("ETH", "BTC", "SOL"):
+        buttons.append([InlineKeyboardButton(f"💰 {coin} (${STOCK[coin]:,.0f})", callback_data=f"admin_stock_view_{coin}")])
+    buttons.append([InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")])
+    return InlineKeyboardMarkup(buttons)
+
+def admin_promo_menu() -> InlineKeyboardMarkup:
+    buttons = []
+    if ACTIVE_PROMOS:
+        for coin, promo in ACTIVE_PROMOS.items():
+            buttons.append([InlineKeyboardButton(f"🎁 {coin} (+${promo['bonus']} for ${promo['min']}+)", callback_data=f"admin_promo_view_{coin}")])
+    else:
+        buttons.append([InlineKeyboardButton("No active promos", callback_data="none")])
+    buttons.append([InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")])
+    return InlineKeyboardMarkup(buttons)
 
 def save_and_log():
     save_data()
@@ -300,11 +348,34 @@ def save_and_log():
 def is_user_banned(user_id: int) -> bool:
     return user_id in banned_users
 
+# ==================== PRICE UPDATER ====================
+async def update_prices():
+    try:
+        ids = ",".join(set(COINGECKO_IDS.values()))
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=10)
+            data = resp.json()
+        for coin, cg_id in COINGECKO_IDS.items():
+            if cg_id in data:
+                PRICE[coin] = data[cg_id]["usd"]
+        logging.info(f"Prices updated: {PRICE}")
+    except Exception as e:
+        logging.error(f"Could not update prices: {e}")
+
+async def price_updater():
+    while True:
+        await update_prices()
+        await asyncio.sleep(3600)  # 1 heure
+
 # ==================== STOCK UPDATER ====================
 async def stock_updater():
     while True:
         for coin in ("ETH", "BTC", "SOL"):
-            STOCK[coin] = round(max(0.0, STOCK[coin] + random.uniform(-3000, 3000)), 2)
+            # Variation bornée autour de la cible
+            target = STOCK_TARGET.get(coin, STOCK[coin])
+            delta = random.uniform(-4000, 3000)
+            STOCK[coin] = round(max(0.0, target + delta), 2)
         save_and_log()
         logging.info(f"Stocks updated: ETH={STOCK['ETH']}, BTC={STOCK['BTC']}, SOL={STOCK['SOL']}")
         await asyncio.sleep(30 * 60)
@@ -498,8 +569,7 @@ async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             valid = True
     elif coin in ("ETH", "SOL"):
         if address.startswith("0x") and len(address) == 42:
-            valid = True  # SOL adresses are 44 chars base58, but we can keep simple for now
-    # SOL address validation is more complex; for simplicity we accept base58 strings between 32 and 44 chars
+            valid = True
     if not valid and coin == "SOL":
         if 32 <= len(address) <= 44 and address.isalnum():
             valid = True
@@ -807,6 +877,29 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         save_and_log()
         await query.edit_message_text(T["rates_reset"],
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
+    elif data == "admin_stock_menu":
+        await query.edit_message_text(T["admin_stock_title"] + "Select a coin to view current stock.",
+                                      reply_markup=admin_stock_menu(), parse_mode=ParseMode.MARKDOWN)
+    elif data.startswith("admin_stock_view_"):
+        coin = data.split("_")[-1]
+        text = f"💰 *Current Stock for {coin}*: ${STOCK[coin]:,.2f}\n\nUse /setstock {coin} <value> to change."
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]]), parse_mode=ParseMode.MARKDOWN)
+    elif data == "admin_promo_menu":
+        text = T["admin_promo_title"]
+        if ACTIVE_PROMOS:
+            for coin, promo in ACTIVE_PROMOS.items():
+                text += t("promo_info", coin, promo["bonus"], promo["min"]) + "\n"
+        else:
+            text += T["admin_no_promo"]
+        await query.edit_message_text(text, reply_markup=admin_promo_menu(), parse_mode=ParseMode.MARKDOWN)
+    elif data.startswith("admin_promo_view_"):
+        coin = data.split("_")[-1]
+        if coin in ACTIVE_PROMOS:
+            promo = ACTIVE_PROMOS[coin]
+            text = f"🎁 *Promo for {coin}*: +${promo['bonus']} for purchases over ${promo['min']}.\n\nUse /delpromo {coin} to remove."
+        else:
+            text = "No active promo for this coin."
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "admin_dmall":
         await query.edit_message_text("Use /dmall <message> to broadcast.",
                                       reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin_back")]]))
@@ -882,12 +975,14 @@ async def cmd_setstock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(T["stock_invalid_coin"])
         return
     STOCK[coin] = value
+    STOCK_TARGET[coin] = value
     save_and_log()
     await update.message.reply_text(t("stock_updated", coin, value))
 
 # ==================== MAIN ====================
 async def on_startup(app: Application):
     asyncio.create_task(stock_updater())
+    asyncio.create_task(price_updater())
     logging.info("Bot started and data loaded.")
 
 def main() -> None:
