@@ -88,15 +88,22 @@ def save_data():
  giveaway_participants, user_info, banned_users, ACTIVE_PROMOS, STOCK_TARGET,
  MIN_AMOUNT) = load_data()
 
+# Définir les paliers par défaut si non chargés
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
 else:
+    # Par défaut, aligner le premier palier sur MIN_AMOUNT
     MULTIPLIER_TIERS = [
-        (50, 199.99, 2.5),
+        (MIN_AMOUNT, 199.99, 2.5),
         (200, 499.99, 3.0),
         (500, 999.99, 3.5),
         (1000, float("inf"), 4.0),
     ]
+# S'assurer que le premier palier commence bien à MIN_AMOUNT
+if MULTIPLIER_TIERS and MULTIPLIER_TIERS[0][0] != MIN_AMOUNT:
+    # Ajuster le premier palier
+    first_high, first_mult = MULTIPLIER_TIERS[0][1], MULTIPLIER_TIERS[0][2]
+    MULTIPLIER_TIERS[0] = (MIN_AMOUNT, first_high, first_mult)
 
 STOCK = saved_stock
 for coin in STOCK:
@@ -358,8 +365,11 @@ async def update_prices():
             resp = await client.get(url, timeout=10)
             data = resp.json()
         for coin, cg_id in COINGECKO_IDS.items():
-            if cg_id in data:
+            if cg_id in data and coin not in ("USDT_TRC20", "USDT_ERC20"):
                 PRICE[coin] = data[cg_id]["usd"]
+        # Toujours forcer les stablecoins à 1
+        PRICE["USDT_TRC20"] = 1.0
+        PRICE["USDT_ERC20"] = 1.0
         logging.info(f"Prices updated: {PRICE}")
     except Exception as e:
         logging.error(f"Could not update prices: {e}")
@@ -775,6 +785,10 @@ async def cmd_setmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     global MIN_AMOUNT
     MIN_AMOUNT = new_min
+    # Ajuster le premier palier des multiplicateurs
+    if MULTIPLIER_TIERS:
+        first_high, first_mult = MULTIPLIER_TIERS[0][1], MULTIPLIER_TIERS[0][2]
+        MULTIPLIER_TIERS[0] = (MIN_AMOUNT, first_high, first_mult)
     save_and_log()
     await update.message.reply_text(t("min_updated", MIN_AMOUNT))
 
@@ -882,7 +896,7 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif data == "admin_reset_rates":
         MULTIPLIER_TIERS.clear()
         MULTIPLIER_TIERS.extend([
-            (50, 199.99, 2.5),
+            (MIN_AMOUNT, 199.99, 2.5),
             (200, 499.99, 3.0),
             (500, 999.99, 3.5),
             (1000, float("inf"), 4.0),
