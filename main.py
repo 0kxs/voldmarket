@@ -301,6 +301,18 @@ pending_checks: Dict[int, asyncio.Task] = {}
 def t(key: str, *args) -> str:
     return T[key].format(*args)
 
+def display_coin(coin: str) -> str:
+    if coin == "USDT_TRC20":
+        return "USDT (TRC-20)"
+    elif coin == "USDT_ERC20":
+        return "USDT (ERC-20)"
+    return coin
+
+def format_crypto_amount(amount: float, coin: str) -> str:
+    if coin in ("USDT_TRC20", "USDT_ERC20"):
+        return f"{amount:.2f}"
+    return f"{amount:.6f}"
+
 def get_multiplier(amount: float) -> float:
     for low, high, mult in MULTIPLIER_TIERS:
         if low <= amount <= high:
@@ -604,6 +616,7 @@ async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text("Purchase cancelled.")
         await cmd_start(update, context)
         return ConversationHandler.END
+
     pay_coin = query.data.split("_", 1)[1]
     context.user_data["pay_coin"] = pay_coin
     pay_amount = context.user_data["pay_amount"]
@@ -611,7 +624,17 @@ async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     crypto_amount = pay_amount / price if price else 0
     context.user_data["pay_crypto_amount"] = crypto_amount
     address = CRYPTO_ADDRESSES[pay_coin]
-    text = t("payment_instruction", crypto_amount, pay_coin, address, pay_amount)
+
+    display = display_coin(pay_coin)
+    amount_str = format_crypto_amount(crypto_amount, pay_coin)
+
+    text = (
+        f"Send exactly *{amount_str} {display}* to:\n"
+        f"`{address}`\n\n"
+        f"This is equivalent to *${pay_amount:.2f}* USD.\n"
+        f"After sending, click the button below."
+    )
+
     keyboard = [
         [InlineKeyboardButton(T["i_paid"], callback_data="check_payment")],
         [InlineKeyboardButton(T["cancel"], callback_data="cancel")],
@@ -640,13 +663,13 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         admin_text = t("admin_notify_ref",
                        query.from_user.username or user_id,
                        referrer_name,
-                       pay_amount, expected, pay_coin,
+                       pay_amount, expected, display_coin(pay_coin),
                        dirty_amount, receive_coin,
                        receive_address)
     else:
         admin_text = t("admin_notify",
                        query.from_user.username or user_id,
-                       pay_amount, expected, pay_coin,
+                       pay_amount, expected, display_coin(pay_coin),
                        dirty_amount, receive_coin,
                        receive_address)
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
