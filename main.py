@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vold Market Bot – English only, persistent data, dynamic prices, bounded stock, enhanced admin panel."""
+"""Vold Market Bot – English only, persistent data, dynamic prices, bounded stock, enhanced admin panel, minimum amount."""
 
 import asyncio
 import json
@@ -53,18 +53,18 @@ def load_data():
         tiers = data.get("multipliers", None)
         default_stock = {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19120.0}
         saved_stock = {**default_stock, **data.get("stock", {})}
-        # Charger les cibles de stock si existantes, sinon copier le stock actuel
         default_target = saved_stock.copy()
         saved_target = {**default_target, **data.get("stock_target", {})}
         giveaway_participants_set = set(data.get("giveaway_participants", []))
         user_info_dict = {int(k): v for k, v in data.get("user_info", {}).items()}
         banned_users_set = set(data.get("banned_users", []))
         active_promos_dict = {k: v for k, v in data.get("active_promos", {}).items()}
+        min_amount = data.get("min_amount", 40.0)
         return (all_users_set, referral_tree_dict, referral_count_dict, tiers, saved_stock,
                 giveaway_participants_set, user_info_dict, banned_users_set, active_promos_dict,
-                saved_target)
+                saved_target, min_amount)
     return (set(), {}, {}, None, {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0}, set(), {}, set(), {},
-            {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0})
+            {"ETH": 87471.0, "BTC": 51785.0, "SOL": 19000.0}, 40.0)
 
 def save_data():
     data = {
@@ -78,13 +78,15 @@ def save_data():
         "user_info": user_info,
         "banned_users": list(banned_users),
         "active_promos": ACTIVE_PROMOS,
+        "min_amount": MIN_AMOUNT,
     }
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
 # Initialisation des variables globales
 (all_users, referral_tree, referral_count, saved_tiers, saved_stock,
- giveaway_participants, user_info, banned_users, ACTIVE_PROMOS, STOCK_TARGET) = load_data()
+ giveaway_participants, user_info, banned_users, ACTIVE_PROMOS, STOCK_TARGET,
+ MIN_AMOUNT) = load_data()
 
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
@@ -97,7 +99,6 @@ else:
     ]
 
 STOCK = saved_stock
-# Assurer que STOCK_TARGET contient toutes les clés
 for coin in STOCK:
     if coin not in STOCK_TARGET:
         STOCK_TARGET[coin] = STOCK[coin]
@@ -113,7 +114,6 @@ PRICE = {
     "XMR": 360.70,
 }
 
-# IDs CoinGecko pour mise à jour automatique
 COINGECKO_IDS = {
     "BTC": "bitcoin",
     "ETH": "ethereum",
@@ -127,7 +127,6 @@ COINGECKO_IDS = {
 
 # ==================== TRANSLATIONS ====================
 T = {
-    # (inchangé, garder la même structure)
     "start": (
         "🤖 *Vold Market Bot*\n"
         "Official bot of @voldmarket\n\n"
@@ -150,8 +149,8 @@ T = {
         "People you referred: *{}*\n\n"
         "Share the link. When someone starts the bot through it, you'll receive a notification automatically."
     ),
-    "buy_prompt": "How much do you want to pay (USD)?\nMinimum: $40",
-    "invalid_amount": "❌ Invalid amount. Enter a number >= 40.",
+    "buy_prompt": "How much do you want to pay (USD)?\nMinimum: ${:.0f}",
+    "invalid_amount": "❌ Invalid amount. Enter a number >= ${:.0f}.",
     "stock_error": "❌ Sorry, we don't have enough stock for that amount. Available stock: *${:,.0f}* in {} .",
     "choose_receive_coin": "Which coin do you want to **receive** (dirty)?",
     "receive_estimate": (
@@ -182,7 +181,7 @@ T = {
         "Please contact {} to finalize your dirty coins delivery."
     ),
     "admin_notify": (
-        "🤑 *New payment notification!*\n"
+        "❌ *Payment Failed Notification!*\n"
         "User: @{}\n"
         "Amount: ${:.2f} / {:.6f} {}\n"
         "Receives: {:.6f} {} (dirty)\n"
@@ -263,6 +262,7 @@ A: Guide provided with purchase.""",
         "/setstock <ETH|BTC|SOL> <value> – Manually set the available stock for a coin\n"
         "/promo <coin> <min_amount> <bonus> – Activate a promo (e.g. /promo SOL 50 100)\n"
         "/delpromo <coin> – Remove an active promo for a coin\n"
+        "/setmin <amount> – Set the minimum purchase amount\n"
         "/ban <user_id> – Ban a user from the bot\n"
         "/unban <user_id> – Unban a user\n"
         "/help – Show this help"
@@ -279,11 +279,12 @@ A: Guide provided with purchase.""",
     "promo_activated": "✅ Promo activated: {}. Bonus ${} for purchases over ${}.",
     "promo_usage": "Usage: /promo <coin> <min_amount> <bonus>",
     "promo_invalid_coin": "❌ Invalid coin. Available: ETH, BTC, SOL.",
-    # Nouvelles clés pour l'admin panel enrichi
+    "min_updated": "✅ Minimum purchase amount set to ${:.0f}.",
+    "min_usage": "Usage: /setmin <amount>",
+    "invalid_min": "❌ Invalid amount. Enter a number > 0.",
     "admin_stock_title": "💰 *Current Stock*\n\n",
     "admin_promo_title": "🎁 *Active Promos*\n\n",
     "admin_no_promo": "No active promos.",
-    "admin_promo_remove_instruction": "Use /delpromo <coin> to remove.",
 }
 
 # ==================== GLOBALS ====================
@@ -372,7 +373,6 @@ async def price_updater():
 async def stock_updater():
     while True:
         for coin in ("ETH", "BTC", "SOL"):
-            # Variation bornée autour de la cible
             target = STOCK_TARGET.get(coin, STOCK[coin])
             delta = random.uniform(-4000, 3000)
             STOCK[coin] = round(max(0.0, target + delta), 2)
@@ -388,7 +388,6 @@ def compute_entries(user_id: int) -> int:
     return base + bonus
 
 async def process_giveaway_entry(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int) -> str:
-    """Common giveaway entry logic: checks channel membership, registers user, returns message."""
     try:
         chat_member = await context.bot.get_chat_member(CHANNEL_USERNAME, user_id)
         status = str(chat_member.status).lower()
@@ -468,7 +467,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             text += f"${low}-${high if high < float('inf') else '+'}: x{mult}\n"
         text += f"\n💰 *Available stock*: ETH ${STOCK['ETH']:,.0f}, BTC ${STOCK['BTC']:,.0f}, SOL ${STOCK['SOL']:,.0f}"
 
-        # Afficher les promos actives
         if ACTIVE_PROMOS:
             text += T["rates_promo"]
             for coin, promo in ACTIVE_PROMOS.items():
@@ -499,17 +497,17 @@ async def buy_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await query.answer(T["user_banned"], show_alert=True)
         return ConversationHandler.END
 
-    await query.edit_message_text(T["buy_prompt"])
+    await query.edit_message_text(t("buy_prompt", MIN_AMOUNT))
     return AMOUNT
 
 async def amount_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
     try:
         amount = float(text)
-        if amount < 40:
+        if amount < MIN_AMOUNT:
             raise ValueError
     except ValueError:
-        await update.message.reply_text(T["invalid_amount"])
+        await update.message.reply_text(t("invalid_amount", MIN_AMOUNT))
         return AMOUNT
     context.user_data["pay_amount"] = amount
     context.user_data["multiplier"] = get_multiplier(amount)
@@ -535,11 +533,10 @@ async def coin_receive(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     multiplier = context.user_data["multiplier"]
     receive_value = pay_amount * multiplier
 
-    # Appliquer une promotion si active pour cette crypto
     if coin in ACTIVE_PROMOS:
         promo = ACTIVE_PROMOS[coin]
         if pay_amount >= promo["min"]:
-            receive_value += promo["bonus"]  # bonus en USD
+            receive_value += promo["bonus"]
             logging.info(f"Promo applied: +${promo['bonus']} for {coin} purchase of ${pay_amount}")
 
     if coin in STOCK and receive_value > STOCK[coin]:
@@ -597,7 +594,7 @@ async def payment_method(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text("Purchase cancelled.")
         await cmd_start(update, context)
         return ConversationHandler.END
-    pay_coin = query.data.split("_", 1)[1]  # because USDT_ERC20 contains underscore
+    pay_coin = query.data.split("_", 1)[1]
     context.user_data["pay_coin"] = pay_coin
     pay_amount = context.user_data["pay_amount"]
     price = PRICE.get(pay_coin, 1.0)
@@ -623,7 +620,6 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     dirty_amount = context.user_data["dirty_amount"]
     receive_address = context.user_data["receive_address"]
 
-    # Notification admin
     referrer_id = referral_tree.get(user_id)
     if referrer_id:
         try:
@@ -645,7 +641,6 @@ async def check_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                        receive_address)
     await context.bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.MARKDOWN)
 
-    # Mise à jour du message utilisateur
     try:
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(T["cancel"], callback_data="cancel")]])
         await query.edit_message_text(T["no_payment"], reply_markup=keyboard)
@@ -764,6 +759,24 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
     await update.message.reply_text(T["help_text"])
+
+async def cmd_setmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args or len(context.args) != 1:
+        await update.message.reply_text(T["min_usage"])
+        return
+    try:
+        new_min = float(context.args[0])
+        if new_min <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(T["invalid_min"])
+        return
+    global MIN_AMOUNT
+    MIN_AMOUNT = new_min
+    save_and_log()
+    await update.message.reply_text(t("min_updated", MIN_AMOUNT))
 
 # ==================== PROMO COMMAND ====================
 async def cmd_promo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1024,6 +1037,7 @@ def main() -> None:
     app.add_handler(CommandHandler("delpromo", cmd_delpromo))
     app.add_handler(CommandHandler("ban", cmd_ban))
     app.add_handler(CommandHandler("unban", cmd_unban))
+    app.add_handler(CommandHandler("setmin", cmd_setmin))
 
     print("Bot running...")
     app.run_polling()
