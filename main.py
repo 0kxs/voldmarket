@@ -88,20 +88,16 @@ def save_data():
  giveaway_participants, user_info, banned_users, ACTIVE_PROMOS, STOCK_TARGET,
  MIN_AMOUNT) = load_data()
 
-# Définir les paliers par défaut si non chargés
 if saved_tiers is not None:
     MULTIPLIER_TIERS = [(low, high, mult) for low, high, mult in saved_tiers]
 else:
-    # Par défaut, aligner le premier palier sur MIN_AMOUNT
     MULTIPLIER_TIERS = [
         (MIN_AMOUNT, 199.99, 2.5),
         (200, 499.99, 3.0),
         (500, 999.99, 3.5),
         (1000, float("inf"), 4.0),
     ]
-# S'assurer que le premier palier commence bien à MIN_AMOUNT
 if MULTIPLIER_TIERS and MULTIPLIER_TIERS[0][0] != MIN_AMOUNT:
-    # Ajuster le premier palier
     first_high, first_mult = MULTIPLIER_TIERS[0][1], MULTIPLIER_TIERS[0][2]
     MULTIPLIER_TIERS[0] = (MIN_AMOUNT, first_high, first_mult)
 
@@ -272,6 +268,7 @@ A: Guide provided with purchase.""",
         "/setmin <amount> – Set the minimum purchase amount\n"
         "/ban <user_id> – Ban a user from the bot\n"
         "/unban <user_id> – Unban a user\n"
+        "/cancel – Reset any ongoing conversation\n"
         "/help – Show this help"
     ),
     "stock_updated": "✅ Stock for {} set to ${:,.2f}",
@@ -292,6 +289,7 @@ A: Guide provided with purchase.""",
     "admin_stock_title": "💰 *Current Stock*\n\n",
     "admin_promo_title": "🎁 *Active Promos*\n\n",
     "admin_no_promo": "No active promos.",
+    "cancel_info": "✅ Cancelled. Send /start to return to the menu.",
 }
 
 # ==================== GLOBALS ====================
@@ -379,7 +377,6 @@ async def update_prices():
         for coin, cg_id in COINGECKO_IDS.items():
             if cg_id in data and coin not in ("USDT_TRC20", "USDT_ERC20"):
                 PRICE[coin] = data[cg_id]["usd"]
-        # Toujours forcer les stablecoins à 1
         PRICE["USDT_TRC20"] = 1.0
         PRICE["USDT_ERC20"] = 1.0
         logging.info(f"Prices updated: {PRICE}")
@@ -389,7 +386,7 @@ async def update_prices():
 async def price_updater():
     while True:
         await update_prices()
-        await asyncio.sleep(3600)  # 1 heure
+        await asyncio.sleep(3600)
 
 # ==================== STOCK UPDATER ====================
 async def stock_updater():
@@ -473,11 +470,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text(T["start"], reply_markup=main_menu(), parse_mode=ParseMode.MARKDOWN)
 
+async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text(T["cancel_info"])
+    return ConversationHandler.END
+
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
     data = query.data
     user_id = query.from_user.id
+
+    logging.info(f"menu_callback: data={data!r} user={user_id}")
 
     if is_user_banned(user_id):
         await query.answer(T["user_banned"], show_alert=True)
@@ -505,7 +508,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         text = t("referral_info", BOT_USERNAME, user_id, count)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(T["back"], callback_data="back")]]), parse_mode=ParseMode.MARKDOWN)
     elif data == "back":
-        await cmd_start(update, context)
+        await query.edit_message_text(T["start"], reply_markup=main_menu(), parse_mode=ParseMode.MARKDOWN)
 
 # ==================== BUY CONVERSATION ====================
 AMOUNT, COIN_RECEIVE, ADDRESS_RECEIVE, PAYMENT_METHOD, PAYMENT = range(5)
@@ -808,7 +811,6 @@ async def cmd_setmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
     global MIN_AMOUNT
     MIN_AMOUNT = new_min
-    # Ajuster le premier palier des multiplicateurs
     if MULTIPLIER_TIERS:
         first_high, first_mult = MULTIPLIER_TIERS[0][1], MULTIPLIER_TIERS[0][2]
         MULTIPLIER_TIERS[0] = (MIN_AMOUNT, first_high, first_mult)
@@ -897,6 +899,8 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if update.effective_user.id != ADMIN_ID:
         await query.edit_message_text("Access denied.")
         return
+
+    logging.info(f"admin_callback: data={data!r}")
 
     if data == "admin_view_rates":
         text = T["rates_header"]
@@ -1029,6 +1033,15 @@ async def cmd_setstock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     save_and_log()
     await update.message.reply_text(t("stock_updated", coin, value))
 
+# ==================== ERROR HANDLER ====================
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logging.error("Exception while handling an update:", exc_info=context.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text("⚠️ An internal error occurred. Please try again.")
+        except Exception:
+            pass
+
 # ==================== MAIN ====================
 async def on_startup(app: Application):
     asyncio.create_task(stock_updater())
@@ -1036,7 +1049,10 @@ async def on_startup(app: Application):
     logging.info("Bot started and data loaded.")
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
     app = Application.builder().token(BOT_TOKEN).post_init(on_startup).build()
 
     conv_handler = ConversationHandler(
@@ -1051,18 +1067,29 @@ def main() -> None:
                 CallbackQueryHandler(cancel_buy, pattern="^cancel$"),
             ],
         },
-        fallbacks=[CallbackQueryHandler(cancel_buy, pattern="^cancel$")],
+        fallbacks=[
+            CommandHandler("cancel", cmd_cancel),
+            CommandHandler("start", cmd_start),
+            CommandHandler("admin", cmd_admin),
+            CommandHandler("help", cmd_help),
+            CallbackQueryHandler(menu_callback, pattern="^(referral|rates|faq|tos|support|back)$"),
+            CallbackQueryHandler(admin_callback, pattern="^admin_"),
+            CallbackQueryHandler(cancel_buy, pattern="^cancel$"),
+        ],
+        allow_reentry=True,
     )
     app.add_handler(conv_handler)
 
+    # Menu & admin callbacks (fallback for non-conversation contexts)
     app.add_handler(CallbackQueryHandler(menu_callback, pattern="^(referral|rates|faq|tos|support|back)$"))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern="^admin_"))
 
-    # Commandes publiques
+    # Public commands
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("giveaway", cmd_giveaway))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
 
-    # Commandes admin
+    # Admin commands
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
@@ -1076,8 +1103,14 @@ def main() -> None:
     app.add_handler(CommandHandler("unban", cmd_unban))
     app.add_handler(CommandHandler("setmin", cmd_setmin))
 
+    # Global error handler
+    app.add_error_handler(error_handler)
+
     print("Bot running...")
-    app.run_polling()
+    app.run_polling(
+        drop_pending_updates=False,
+        allowed_updates=Update.ALL_TYPES,
+    )
 
 if __name__ == "__main__":
     main()
