@@ -24,7 +24,7 @@ from telegram.ext import (
 # ==================== CONFIG ====================
 BOT_TOKEN = "8929119049:AAECELNoFRLd5fyY_thieXasxz0K9kthtt8"
 ADMIN_ID = 8745164587
-SUPPORT_USERNAME = "@reuvensh"
+SUPPORT_USERNAME = "@yatuke"
 CHANNEL_USERNAME = "@voldmarket"
 VOUCHES_USERNAME = "@voldvouches"
 BOT_USERNAME = "@voldmarket_bot"
@@ -212,7 +212,7 @@ Q: Why are the coins cheaper?
 A: They have a risky history – Drain, call etc. That risk justifies the discount.
 
 Q: How do I buy?
-A: Use the bot or message @reuvensh. You'll get a deposit address.
+A: Use the bot or message @yatuke. You'll get a deposit address.
 
 Q: Minimum?
 A: $40 equivalent. No maximum.
