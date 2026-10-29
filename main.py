@@ -261,6 +261,7 @@ A: Guide provided with purchase.""",
         "/stats – Show bot statistics\n"
         "/top – Show top referrers\n"
         "/dmall [message] – Send a broadcast message to all users (optional custom message)\n"
+        "/adminmessage <message> – Send a private message to the admin\n"
         "/setrates <low> <high> <mult> – Add or update a multiplier tier\n"
         "/setstock <ETH|BTC|SOL> <value> – Manually set the available stock for a coin\n"
         "/promo <coin> <min_amount> <bonus> – Activate a promo (e.g. /promo SOL 50 100)\n"
@@ -988,6 +989,16 @@ async def cmd_dmall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             logging.warning(f"Could not DMALL to {uid}: {e}")
     await update.message.reply_text(f"DMALL sent to {success}/{len(all_users)} users.")
 
+async def cmd_adminmessage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /adminmessage <message>")
+        return
+    message = update.effective_message.text.split(maxsplit=1)[1]
+    await context.bot.send_message(chat_id=ADMIN_ID, text=message)
+    await update.effective_message.reply_text("Message sent privately to the admin.")
+
 async def cmd_setrates(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user.id != ADMIN_ID:
         return
@@ -1095,6 +1106,7 @@ def main() -> None:
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("top", cmd_top))
     app.add_handler(CommandHandler("dmall", cmd_dmall))
+    app.add_handler(CommandHandler("adminmessage", cmd_adminmessage))
     app.add_handler(CommandHandler("setrates", cmd_setrates))
     app.add_handler(CommandHandler("setstock", cmd_setstock))
     app.add_handler(CommandHandler("promo", cmd_promo))
